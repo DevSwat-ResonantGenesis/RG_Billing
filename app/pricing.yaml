@@ -1,0 +1,255 @@
+# ============================================================
+# ResonantGenesis Billing Service - Pricing Configuration
+# SINGLE SOURCE OF TRUTH for all credit costs and plan pricing
+# ============================================================
+# This file should be the canonical source for:
+# - Credit exchange rates
+# - Plan pricing and limits
+# - Credit pack pricing
+# ============================================================
+
+# Credit Rate (1 credit ≈ $0.001)
+credit_rate:
+  value: 0.001
+  currency: USD
+  description: "1 credit ≈ $0.001"
+  mental_math: "1,000 credits = $1.00"
+
+# Global Multipliers
+global:
+  multiplier: 1.0
+  min_operation_cost: 1
+
+# ============================================================
+# CREDIT EXCHANGE RATES
+# ============================================================
+
+credit_costs:
+  # Tier 1: Chat/LLM Costs
+  chat:
+    prompt_token_cost: 0.8      # Per input token
+    completion_token_cost: 1.0  # Per output token
+    base_cost: 10               # Minimum per request
+    streaming_overhead: 50      # Extra for streaming
+    message_avg: 20             # Average message cost
+    
+    # Provider multipliers
+    providers:
+      openai: 1.0
+      anthropic: 1.2
+      google: 0.8
+      local: 0.1
+      groq: 0.5
+
+  # Tier 2: Agent Execution
+  agents:
+    session_start: 100
+    step: 500
+    tool_invocation: 200
+    web_call: 300
+    memory_write: 50
+    goal_completion: 200
+    team_run: 500
+    pipeline: 300
+    
+    # Agent type multipliers
+    types:
+      simple: 0.5
+      default: 1.0
+      complex: 1.5
+      autonomous: 2.0
+
+  # Tier 3: Compute/IDE
+  compute:
+    code_execution_rate: 1.0    # Per millisecond
+    terminal_rate: 1.0
+    preview_rate: 0.5
+    min_code_execution: 100
+    min_terminal: 50
+    min_preview: 200
+    max_code_execution: 10000
+    max_terminal: 5000
+    max_preview: 60000
+    code_execution_base: 5      # Simple display value
+
+  # Tier 4: Workflows
+  workflows:
+    start: 1000
+    node: 300
+    conditional: 200
+    parallel: 400
+    step: 20                    # Simple display value
+    scheduled_trigger: 10
+    webhook_trigger: 5
+
+  # Tier 5: Memory/Storage
+  storage:
+    embed: 100
+    retrieve: 50
+    store: 20
+    delete: 5
+    batch_discount: 0.8
+    per_mb: 1
+    per_gb: 1000
+    memory_write: 2
+    memory_read: 0
+    rag_upload: 10
+
+  # Tier 6: Blockchain Audit
+  blockchain:
+    audit_entry: 100
+    verification: 10
+    compliance_report: 500
+    smart_contract_deploy: 1000
+
+  # Tier 7: Hash Sphere
+  hash_sphere:
+    identity_add: 50
+    transaction_record: 20
+    trust_relationship: 10
+    perturbation_simulation: 100
+
+  # Tier 8: Code Visualizer
+  code_visualizer:
+    codebase_analysis: 200
+    governance_check: 50
+    graph_export: 20
+
+  # API Costs
+  api:
+    get: 1
+    post: 5
+    put: 5
+    delete: 3
+
+# ============================================================
+# SUBSCRIPTION PLANS
+# ============================================================
+
+plans:
+  developer:
+    id: developer
+    name: Developer
+    # No stripe_price_id needed - we use dynamic price_data
+    price:
+      monthly: 0
+      yearly: 0
+    credits:
+      included: 1000
+      rollover: false
+      topups: true
+    credit_rate: 1.0            # Full price
+    limits:
+      users: 1                  # Single user only
+      teams: 0                  # No team features
+      org_features: false       # No org management UI
+      agents: 3
+      autonomous_mode: false
+      conversations: 1000
+      messages_per_day: 100
+      compute_hours: 10
+      storage_mb: 100
+
+  plus:
+    id: plus
+    name: Plus
+    # No stripe_price_id needed - we use dynamic price_data
+    price:
+      monthly: 499
+      yearly: 4990
+    credits:
+      included: 499000          # 499,000 credits/month
+      rollover: true
+      rollover_limit: 249500    # Rollover up to 249.5K
+      topups: true
+      topup_price: 8            # $8 per 10K credits
+      topup_amount: 10000
+    credit_rate: 1.0            # Full price
+    limits:
+      users: 1                  # Single user only (no teams)
+      teams: 0                  # No team features
+      org_features: false       # No org management UI
+      agents: 20
+      autonomous_mode: true
+      conversations: 1000
+      messages_per_day: 1000
+      compute_hours: 100
+      storage_mb: 5000
+
+  enterprise:
+    id: enterprise
+    name: Enterprise
+    # No stripe_price_id needed - contact sales
+    price:
+      monthly: 0                # Custom
+      yearly: 0
+    credits:
+      included: -1              # Custom/Unlimited
+      rollover: true
+      rollover_limit: -1
+      topups: true
+      topup_price: 5
+      topup_amount: 10000
+    credit_rate: 0.0            # Free (unlimited)
+    limits:
+      users: -1                 # Unlimited users
+      teams: -1                 # Unlimited teams
+      org_features: true        # Full org management
+      agents: -1                # Unlimited
+      autonomous_mode: true
+      conversations: -1
+      messages_per_day: -1
+      compute_hours: -1
+      storage_mb: -1
+
+# ============================================================
+# CREDIT PACKS (Top-ups)
+# ============================================================
+
+credit_packs:
+  - id: starter
+    name: Starter Pack
+    credits: 5000
+    price: 5
+    price_per_1k: 1.00
+
+  - id: basic
+    name: Basic Pack
+    credits: 10000
+    price: 8
+    price_per_1k: 0.80
+    savings_percent: 20
+
+  - id: growth
+    name: Growth Pack
+    credits: 50000
+    price: 35
+    price_per_1k: 0.70
+    savings_percent: 30
+    recommended: true
+
+  - id: scale
+    name: Scale Pack
+    credits: 100000
+    price: 60
+    price_per_1k: 0.60
+    savings_percent: 40
+
+  - id: enterprise
+    name: Enterprise Pack
+    credits: 500000
+    price: 250
+    price_per_1k: 0.50
+    savings_percent: 50
+
+# ============================================================
+# TIER MAPPINGS (for backward compatibility)
+# ============================================================
+
+tier_mappings:
+  free: developer
+  developer: developer
+  plus: plus
+  pro: plus
+  professional: plus
+  enterprise: enterprise
