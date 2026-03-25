@@ -19,17 +19,17 @@ logger = logging.getLogger(__name__)
 ROLLOVER_LIMITS = {
     "developer": 0,        # No rollover for developer tier
     "free": 0,             # Legacy alias -> developer
-    "plus": 37500,         # Up to 37.5K credits
-    "pro": 37500,          # Legacy alias -> plus
+    "plus": 249500,        # Up to 249.5K credits (matches pricing.yaml)
+    "pro": 249500,         # Legacy alias -> plus
     "enterprise": -1,      # Unlimited rollover
 }
 
 # Monthly credit allocations by tier
 TIER_CREDITS = {
-    "developer": 1000,
-    "free": 1000,          # Legacy alias -> developer
-    "plus": 75000,
-    "pro": 75000,          # Legacy alias -> plus
+    "developer": 15000,
+    "free": 15000,         # Legacy alias -> developer
+    "plus": 499000,
+    "pro": 499000,         # Legacy alias -> plus
     "enterprise": -1,      # Unlimited
 }
 

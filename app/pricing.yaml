@@ -132,10 +132,10 @@ plans:
     name: Developer
     # No stripe_price_id needed - we use dynamic price_data
     price:
-      monthly: 0
-      yearly: 0
+      monthly: 15
+      yearly: 150
     credits:
-      included: 1000
+      included: 15000
       rollover: false
       topups: true
     credit_rate: 1.0            # Full price
@@ -143,12 +143,12 @@ plans:
       users: 1                  # Single user only
       teams: 0                  # No team features
       org_features: false       # No org management UI
-      agents: 3
-      autonomous_mode: false
-      conversations: 1000
-      messages_per_day: 100
-      compute_hours: 10
-      storage_mb: 100
+      agents: -1                # Unlimited (credits-only billing)
+      autonomous_mode: true
+      conversations: -1
+      messages_per_day: -1
+      compute_hours: 100
+      storage_mb: 5000
 
   plus:
     id: plus
@@ -169,10 +169,10 @@ plans:
       users: 1                  # Single user only (no teams)
       teams: 0                  # No team features
       org_features: false       # No org management UI
-      agents: 20
+      agents: -1                # Unlimited (credits-only billing)
       autonomous_mode: true
-      conversations: 1000
-      messages_per_day: 1000
+      conversations: -1
+      messages_per_day: -1
       compute_hours: 100
       storage_mb: 5000
 
@@ -247,7 +247,7 @@ credit_packs:
 # ============================================================
 
 tier_mappings:
-  free: developer
+  free: developer          # Legacy: free tier no longer exists
   developer: developer
   plus: plus
   pro: plus
