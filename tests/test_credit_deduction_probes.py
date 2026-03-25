@@ -54,15 +54,15 @@ class TestPricingLoader:
         """Test getting developer plan."""
         plan = get_plan("developer")
         assert plan is not None
-        assert plan["credits"]["included"] == 1000
-        assert plan["price"]["monthly"] == 0
+        assert plan["credits"]["included"] == 15000
+        assert plan["price"]["monthly"] == 15
     
     def test_get_plan_plus(self):
         """Test getting plus plan."""
         plan = get_plan("plus")
         assert plan is not None
-        assert plan["credits"]["included"] == 75000
-        assert plan["price"]["monthly"] == 49
+        assert plan["credits"]["included"] == 499000
+        assert plan["price"]["monthly"] == 499
     
     def test_get_plan_with_mapping(self):
         """Test plan retrieval with tier mapping."""
@@ -78,8 +78,8 @@ class TestPricingLoader:
     
     def test_get_plan_credits(self):
         """Test getting plan credits."""
-        assert get_plan_credits("developer") == 1000
-        assert get_plan_credits("plus") == 75000
+        assert get_plan_credits("developer") == 15000
+        assert get_plan_credits("plus") == 499000
         assert get_plan_credits("enterprise") == -1  # Unlimited
     
     def test_get_credit_packs(self):
@@ -198,7 +198,7 @@ class TestCreditCalculationFormulas:
         # 1 credit = $0.001
         # $1 = 1000 credits
         # $10 = 10000 credits (starter pack)
-        # $49 = 49000 credits worth (but Plus gives 75000 = 53% bonus)
+        # $499 = 499000 credits worth (Plus plan)
         
         credit_rate = get_credit_rate()
         credits_per_dollar = 1 / credit_rate
@@ -207,19 +207,19 @@ class TestCreditCalculationFormulas:
     
     def test_developer_monthly_budget(self):
         """Test how many messages Developer tier can send."""
-        monthly_credits = get_plan_credits("developer")  # 10000
+        monthly_credits = get_plan_credits("developer")  # 15000
         avg_message_cost = 20  # Average from pricing.yaml
         
         messages_per_month = monthly_credits // avg_message_cost
-        assert messages_per_month == 500, f"Developer should get ~500 messages/month, got {messages_per_month}"
+        assert messages_per_month == 750, f"Developer should get ~750 messages/month, got {messages_per_month}"
     
     def test_plus_monthly_budget(self):
         """Test how many messages Plus tier can send."""
-        monthly_credits = get_plan_credits("plus")  # 75000
+        monthly_credits = get_plan_credits("plus")  # 499000
         avg_message_cost = 20
         
         messages_per_month = monthly_credits // avg_message_cost
-        assert messages_per_month == 3750, f"Plus should get ~3750 messages/month, got {messages_per_month}"
+        assert messages_per_month == 24950, f"Plus should get ~24950 messages/month, got {messages_per_month}"
 
 
 class TestAgentCostCalculations:

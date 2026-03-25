@@ -41,14 +41,14 @@ class TestTierCredits:
     """Test tier credit allocations."""
     
     def test_free_tier_credits(self):
-        """Test free tier credit allocation."""
-        assert TIER_CREDITS["developer"] == 1000
-        assert TIER_CREDITS["free"] == 1000
+        """Test developer tier credit allocation."""
+        assert TIER_CREDITS["developer"] == 15000
+        assert TIER_CREDITS["free"] == 15000
     
     def test_plus_tier_credits(self):
         """Test plus tier credit allocation."""
-        assert TIER_CREDITS["plus"] == 50000
-        assert TIER_CREDITS["pro"] == 50000
+        assert TIER_CREDITS["plus"] == 499000
+        assert TIER_CREDITS["pro"] == 499000
     
     def test_enterprise_unlimited(self):
         """Test enterprise has unlimited credits."""
@@ -64,14 +64,14 @@ class TestCreditRolloverService:
     def test_get_rollover_limit(self):
         """Test getting rollover limit for tiers."""
         assert self.service.get_rollover_limit("developer") == 0
-        assert self.service.get_rollover_limit("plus") == 25000
+        assert self.service.get_rollover_limit("plus") == 249500
         assert self.service.get_rollover_limit("enterprise") == -1
         assert self.service.get_rollover_limit("unknown") == 0
     
     def test_get_tier_credits(self):
         """Test getting tier credits."""
-        assert self.service.get_tier_credits("developer") == 1000
-        assert self.service.get_tier_credits("plus") == 50000
+        assert self.service.get_tier_credits("developer") == 15000
+        assert self.service.get_tier_credits("plus") == 499000
         assert self.service.get_tier_credits("enterprise") == -1
 
 
@@ -91,27 +91,27 @@ class TestCalculateRollover:
     
     def test_plus_tier_under_cap(self):
         """Test plus tier rollover under cap."""
-        amount, capped, cap = self.service.calculate_rollover(10000, "plus")
+        amount, capped, cap = self.service.calculate_rollover(100000, "plus")
         
-        assert amount == 10000
+        assert amount == 100000
         assert capped is False
-        assert cap == 25000
+        assert cap == 249500
     
     def test_plus_tier_over_cap(self):
         """Test plus tier rollover over cap."""
-        amount, capped, cap = self.service.calculate_rollover(40000, "plus")
+        amount, capped, cap = self.service.calculate_rollover(300000, "plus")
         
-        assert amount == 25000
+        assert amount == 249500
         assert capped is True
-        assert cap == 25000
+        assert cap == 249500
     
     def test_plus_tier_at_cap(self):
         """Test plus tier rollover at exactly cap."""
-        amount, capped, cap = self.service.calculate_rollover(25000, "plus")
+        amount, capped, cap = self.service.calculate_rollover(249500, "plus")
         
-        assert amount == 25000
+        assert amount == 249500
         assert capped is False
-        assert cap == 25000
+        assert cap == 249500
     
     def test_enterprise_unlimited(self):
         """Test enterprise keeps all credits."""
@@ -137,24 +137,24 @@ class TestRolloverResult:
         result = RolloverResult(
             user_id="user123",
             tier="plus",
-            previous_balance=30000,
-            rollover_amount=25000,
-            new_credits=50000,
-            new_balance=75000,
-            rollover_capped=True,
-            cap_amount=25000,
+            previous_balance=200000,
+            rollover_amount=200000,
+            new_credits=499000,
+            new_balance=699000,
+            rollover_capped=False,
+            cap_amount=249500,
         )
         
         d = result.to_dict()
         
         assert d["user_id"] == "user123"
         assert d["tier"] == "plus"
-        assert d["previous_balance"] == 30000
-        assert d["rollover_amount"] == 25000
-        assert d["new_credits"] == 50000
-        assert d["new_balance"] == 75000
-        assert d["rollover_capped"] is True
-        assert d["cap_amount"] == 25000
+        assert d["previous_balance"] == 200000
+        assert d["rollover_amount"] == 200000
+        assert d["new_credits"] == 499000
+        assert d["new_balance"] == 699000
+        assert d["rollover_capped"] is False
+        assert d["cap_amount"] == 249500
 
 
 class TestProcessPeriodEnd:
@@ -167,14 +167,14 @@ class TestProcessPeriodEnd:
     async def test_process_period_end_plus_tier(self):
         """Test period end for plus tier - unit test calculation logic."""
         # Test the calculation directly since DB mocking is complex
-        rollover, capped, cap = self.service.calculate_rollover(30000, "plus")
+        rollover, capped, cap = self.service.calculate_rollover(200000, "plus")
         new_credits = self.service.get_tier_credits("plus")
         new_balance = rollover + new_credits
         
-        assert rollover == 25000  # Capped at 25K
-        assert capped is True
-        assert new_credits == 50000
-        assert new_balance == 75000
+        assert rollover == 200000  # Under 249.5K cap
+        assert capped is False
+        assert new_credits == 499000
+        assert new_balance == 699000
     
     @pytest.mark.asyncio
     async def test_process_period_end_user_not_found(self):
@@ -201,7 +201,7 @@ class TestPreviewRollover:
         
         mock_state = MagicMock()
         mock_state.user_id = "user123"
-        mock_state.credit_balance = 40000
+        mock_state.credit_balance = 300000
         mock_state.subscription_tier.value = "plus"
         mock_state.current_period_start = datetime.utcnow() - timedelta(days=20)
         
@@ -213,12 +213,12 @@ class TestPreviewRollover:
         
         assert preview["user_id"] == "user123"
         assert preview["tier"] == "plus"
-        assert preview["current_balance"] == 40000
-        assert preview["rollover_limit"] == 25000
-        assert preview["rollover_amount"] == 25000
-        assert preview["credits_to_expire"] == 15000
-        assert preview["new_period_credits"] == 50000
-        assert preview["projected_new_balance"] == 75000
+        assert preview["current_balance"] == 300000
+        assert preview["rollover_limit"] == 249500
+        assert preview["rollover_amount"] == 249500
+        assert preview["credits_to_expire"] == 50500
+        assert preview["new_period_credits"] == 499000
+        assert preview["projected_new_balance"] == 748500
         assert preview["days_remaining"] >= 0
 
 

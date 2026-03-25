@@ -385,7 +385,7 @@ async def handle_subscription_deleted(payload: Dict[str, Any]) -> Dict[str, Any]
     """
     Handle customer.subscription.deleted event.
     
-    Downgrades user to free tier.
+    Downgrades user to developer tier.
     """
     subscription = payload.get("data", {}).get("object", {})
     

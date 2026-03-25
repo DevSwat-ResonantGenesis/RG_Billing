@@ -50,17 +50,17 @@ class TestPricingAPI:
         dev = data["plans"]["developer"]
         
         # Price
-        assert dev["price"]["monthly"] == 0, "Developer should be free"
-        assert dev["price"]["yearly"] == 0
+        assert dev["price"]["monthly"] == 15, "Developer should be $15/mo"
+        assert dev["price"]["yearly"] == 150
         
         # Credits
-        assert dev["credits"]["included"] == 1000
+        assert dev["credits"]["included"] == 15000
         assert dev["credits"]["rollover"] == False, "Developer should not have rollover"
-        assert dev["credits"]["topups"] == False, "Developer should not have topups"
+        assert dev["credits"]["topups"] == True, "Developer should have topups"
         
         # Limits
-        assert dev["limits"]["agents"] == 3
-        assert dev["limits"]["autonomous_mode"] == False
+        assert dev["limits"]["agents"] == -1
+        assert dev["limits"]["autonomous_mode"] == True
     
     def test_plus_plan_values(self):
         """Test Plus plan has correct values."""
@@ -69,18 +69,18 @@ class TestPricingAPI:
         plus = data["plans"]["plus"]
         
         # Price
-        assert plus["price"]["monthly"] == 49, f"Plus should be $49/month, got {plus['price']['monthly']}"
-        assert plus["price"]["yearly"] == 490
+        assert plus["price"]["monthly"] == 499, f"Plus should be $499/month, got {plus['price']['monthly']}"
+        assert plus["price"]["yearly"] == 4990
         
         # Credits
-        assert plus["credits"]["included"] == 75000, f"Plus should have 75K credits, got {plus['credits']['included']}"
+        assert plus["credits"]["included"] == 499000, f"Plus should have 499K credits, got {plus['credits']['included']}"
         assert plus["credits"]["rollover"] == True
-        assert plus["credits"]["rollover_limit"] == 37500, f"Plus rollover should be 37.5K, got {plus['credits'].get('rollover_limit')}"
+        assert plus["credits"]["rollover_limit"] == 249500, f"Plus rollover should be 249.5K, got {plus['credits'].get('rollover_limit')}"
         assert plus["credits"]["topups"] == True
         assert plus["credits"]["topup_price"] == 8, "Plus topup should be $8/10K"
         
         # Limits
-        assert plus["limits"]["agents"] == 20
+        assert plus["limits"]["agents"] == -1
         assert plus["limits"]["autonomous_mode"] == True
     
     def test_enterprise_plan_values(self):

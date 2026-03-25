@@ -101,12 +101,12 @@ async def get_billing_dashboard(
     state = result.scalar_one_or_none()
     
     if not state:
-        # Auto-create economic state for new users with free tier
+        # Auto-create economic state for new users with developer tier
         state = UserEconomicState(
             user_id=user_id,
             org_id=user_id,  # Default org_id to user_id
             subscription_tier="developer",
-            credit_balance=1000,  # Default free tier credits (1k/month)
+            credit_balance=15000,  # Developer tier credits (15k/month)
         )
         db.add(state)
         await db.commit()
@@ -114,7 +114,7 @@ async def get_billing_dashboard(
     
     # Get tier defaults
     tier_defaults = TIER_DEFAULTS.get(state.subscription_tier, {})
-    tier_credits = tier_defaults.get("credit_balance", 1000)
+    tier_credits = tier_defaults.get("credit_balance", 15000)
     
     # Get actual credit balance from credit_balances table (where deductions are recorded)
     balance_result = await db.execute(
@@ -465,7 +465,7 @@ async def get_usage_summary(
     
     # Get tier info
     tier_defaults = TIER_DEFAULTS.get(state.subscription_tier, {})
-    tier_credits = tier_defaults.get("credit_balance", 1000)
+    tier_credits = tier_defaults.get("credit_balance", 15000)
     
     # Get usage for last 30 days
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)

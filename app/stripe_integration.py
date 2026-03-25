@@ -55,7 +55,7 @@ STRIPE_PRICE_TO_TIER: Dict[str, SubscriptionTier] = {
 # Reverse mapping for creating Stripe subscriptions
 TIER_TO_STRIPE_PRICE: Dict[SubscriptionTier, Dict[str, str]] = {
     SubscriptionTier.DEVELOPER: {
-        "monthly": None,  # Free tier - no Stripe subscription
+        "monthly": None,  # $15/mo - uses dynamic price_data, not fixed price IDs
         "yearly": None,
     },
     SubscriptionTier.PLUS: {
@@ -98,7 +98,7 @@ def get_tier_from_price_id(price_id: str) -> SubscriptionTier:
 def get_price_id_for_tier(tier: SubscriptionTier, billing_cycle: str = "monthly") -> Optional[str]:
     """
     Get the Stripe price ID for a tier and billing cycle.
-    Returns None for free tier (no Stripe subscription needed).
+    Returns None for tiers using dynamic price_data (Developer) or custom pricing (Enterprise).
     """
     return TIER_TO_STRIPE_PRICE.get(tier, {}).get(billing_cycle)
 
@@ -246,7 +246,7 @@ async def handle_subscription_deleted(
     
     Actions:
     1. Set subscription_status = canceled
-    2. Downgrade to FREE tier
+    2. Downgrade to Developer tier
     3. Keep existing credits (don't punish)
     """
     subscription = event_data.get("object", {})

@@ -21,8 +21,8 @@ class TestCreditManager:
         self.manager = CreditManager()
     
     def test_free_tier_credits(self):
-        """Test free tier credits constant."""
-        assert self.manager.FREE_TIER_CREDITS == 1000
+        """Test developer tier credits constant."""
+        assert self.manager.FREE_TIER_CREDITS == 15000
 
 
 class TestDeductCreditsByTokens:

@@ -289,9 +289,9 @@ async def get_credits_balance_by_id(
     if a user has credits remaining for platform key usage.
     
     Superusers and dev users get unlimited credits.
-    Free tier users start with 1000 credits.
+    Developer tier users start with 15000 credits.
     """
-    FREE_TIER_CREDITS = 1000
+    FREE_TIER_CREDITS = 15000
     
     # Check if target user is superuser/dev/unlimited_credits (passed via headers from calling service)
     is_superuser = x_is_superuser == "true"
