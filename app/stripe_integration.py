@@ -6,7 +6,7 @@ This module handles the mapping between Stripe events and UserEconomicState.
 Rules:
   - Stripe is NOT authoritative (it charges money, emits events)
   - Billing is authoritative (owns truth, mutates UserEconomicState)
-  - Tiers: DEVELOPER (free), PLUS ($499/mo), ENTERPRISE (custom)
+  - Tiers: DEVELOPER ($15/mo), PLUS ($499/mo), ENTERPRISE (custom)
 
 Event Flow:
   checkout.session.completed → upgrade_to_tier() + set status=active + add credits
@@ -142,19 +142,30 @@ async def handle_checkout_completed(
     # Get subscription details
     subscription_id = checkout_session.get("subscription")
     
-    # Get line items to determine price
-    line_items = checkout_session.get("line_items", {}).get("data", [])
-    if not line_items:
-        logger.warning("No line items in checkout session")
-        return None
+    # Determine tier: check metadata first (dynamic price_data), then price_id mapping
+    plan_id = metadata.get("plan_id") or metadata.get("plan")
     
-    price_id = line_items[0].get("price", {}).get("id")
-    if not price_id:
-        logger.warning("No price_id in line items")
-        return None
-    
-    # Map to tier
-    new_tier = get_tier_from_price_id(price_id)
+    if plan_id:
+        # Dynamic price_data checkout — tier comes from metadata
+        tier_name_map = {
+            "developer": SubscriptionTier.DEVELOPER,
+            "plus": SubscriptionTier.PLUS,
+            "enterprise": SubscriptionTier.ENTERPRISE,
+        }
+        new_tier = tier_name_map.get(plan_id.lower(), SubscriptionTier.DEVELOPER)
+    else:
+        # Fixed price_id checkout — map from Stripe price ID
+        line_items = checkout_session.get("line_items", {}).get("data", [])
+        if not line_items:
+            logger.warning("No line items in checkout session")
+            return None
+        
+        price_id = line_items[0].get("price", {}).get("id")
+        if not price_id:
+            logger.warning("No price_id in line items")
+            return None
+        
+        new_tier = get_tier_from_price_id(price_id)
     
     # Get user's economic state WITH ROW-LEVEL LOCK
     # This maintains the single-writer economic invariant
@@ -400,12 +411,12 @@ async def handle_invoice_paid(
         logger.info(f"User {state.user_id} payment received, status restored to active")
     
     # Add monthly credit allocation based on tier
-    tier_credits = TIER_DEFAULTS[state.subscription_tier]["credit_balance"]
-    monthly_allocation = tier_credits // 12  # Rough monthly allocation
+    # TIER_DEFAULTS credit_balance is already the monthly amount (15K dev, 499K plus)
+    monthly_credits = TIER_DEFAULTS[state.subscription_tier]["credit_balance"]
     
-    if monthly_allocation > 0:
-        state.credit_balance += monthly_allocation
-        logger.info(f"User {state.user_id} received {monthly_allocation} monthly credits")
+    if monthly_credits > 0:
+        state.credit_balance += monthly_credits
+        logger.info(f"User {state.user_id} received {monthly_credits} monthly credits")
     
     await session.commit()
     await session.refresh(state)

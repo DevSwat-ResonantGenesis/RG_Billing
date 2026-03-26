@@ -1675,52 +1675,71 @@ async def create_checkout_session(
     user_id: str = Depends(get_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    """Create Stripe checkout session for subscription."""
+    """Create Stripe checkout session for subscription.
+    
+    All paid plans (Developer $15/mo, Plus $499/mo) use dynamic price_data
+    so we don't need pre-configured Stripe price IDs.
+    """
     try:
         import stripe
+        from .pricing_loader import get_plan
+        
         stripe.api_key = settings.STRIPE_SECRET_KEY
         
         if not stripe.api_key:
             raise HTTPException(status_code=500, detail="Stripe not configured")
         
-        # Map plan to price ID
-        from .stripe_integration import get_price_id_for_tier, SubscriptionTier
+        # Look up plan from pricing.yaml
+        plan = get_plan(request.plan_id)
+        if not plan:
+            raise HTTPException(status_code=404, detail=f"Plan '{request.plan_id}' not found")
         
-        tier_map = {
-            "developer": SubscriptionTier.DEVELOPER,
-            "plus": SubscriptionTier.PLUS,
-            "enterprise": SubscriptionTier.ENTERPRISE,
-            # API Subscriptions
-            "state_physics_dev": SubscriptionTier.STATE_PHYSICS_DEV,
-            "state_physics_startup": SubscriptionTier.STATE_PHYSICS_STARTUP,
-            "hash_sphere_memory_dev": SubscriptionTier.HASH_SPHERE_DEV,
-            "hash_sphere_memory_startup": SubscriptionTier.HASH_SPHERE_STARTUP,
-        }
+        # Get price based on billing cycle
+        price_info = plan.get("price", {})
+        if request.billing_cycle == "yearly":
+            amount = price_info.get("yearly", 0)
+            interval = "year"
+        else:
+            amount = price_info.get("monthly", 0)
+            interval = "month"
         
-        tier = tier_map.get(request.plan_id.lower(), SubscriptionTier.DEVELOPER)
-        price_id = get_price_id_for_tier(tier, request.billing_cycle)
+        if amount == 0:
+            # Enterprise or invalid — contact sales
+            raise HTTPException(status_code=400, detail="This plan requires contacting sales")
         
-        if not price_id:
-            if tier == SubscriptionTier.DEVELOPER:
-                # Free tier - no checkout needed
-                return {"status": "success", "message": "Free tier activated"}
-            else:
-                raise HTTPException(status_code=400, detail=f"No price configured for {request.plan_id}")
+        # Get or create Stripe customer
+        customer_id = await _get_or_create_stripe_customer(user_id, session)
         
-        # Create checkout session
+        # Build description
+        credits_included = plan.get("credits", {}).get("included", 0)
+        description = f"{credits_included:,} credits/{interval}. Use credits for chat, agents, code execution, workflows, and more."
+        
+        # Create checkout with dynamic price_data (works for all tiers)
         checkout_session = stripe.checkout.Session.create(
+            customer=customer_id,
             payment_method_types=['card'],
             line_items=[{
-                'price': price_id,
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': f"ResonantGenesis {plan.get('name', request.plan_id.title())}",
+                        'description': description,
+                    },
+                    'unit_amount': int(amount * 100),  # Stripe uses cents
+                    'recurring': {
+                        'interval': interval,
+                    },
+                },
                 'quantity': 1,
             }],
             mode='subscription',
-            success_url=request.success_url or f'{settings.FRONTEND_URL}/billing?success=true',
+            success_url=request.success_url or f'{settings.FRONTEND_URL}/billing?success=true&plan={request.plan_id}',
             cancel_url=request.cancel_url or f'{settings.FRONTEND_URL}/billing?canceled=true',
             metadata={
                 'user_id': user_id,
-                'plan': request.plan_id,
+                'plan_id': request.plan_id,
                 'billing_cycle': request.billing_cycle,
+                'type': 'subscription',
             },
         )
         
@@ -1730,6 +1749,8 @@ async def create_checkout_session(
             "session_id": checkout_session.id,
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Checkout session creation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2010,84 +2031,6 @@ async def create_credits_checkout(
             "checkout_url": checkout_session.url,
             "session_id": checkout_session.id,
             "pack": pack,
-        }
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe checkout error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/checkout/subscription")
-async def create_subscription_checkout(
-    request: CheckoutSubscriptionRequest,
-    user_id: str = Depends(get_user_id),
-    session: AsyncSession = Depends(get_session),
-):
-    """Create Stripe checkout session for subscription."""
-    import stripe
-    from .pricing_loader import get_plan
-    
-    stripe.api_key = settings.STRIPE_SECRET_KEY
-    
-    # Find the plan
-    plan = get_plan(request.plan_id)
-    if not plan:
-        raise HTTPException(status_code=404, detail=f"Plan '{request.plan_id}' not found")
-    
-    # Get price based on billing cycle
-    price_info = plan.get("price", {})
-    if request.billing_cycle == "yearly":
-        amount = price_info.get("yearly", 490)
-        interval = "year"
-    else:
-        amount = price_info.get("monthly", 49)
-        interval = "month"
-    
-    if amount == 0:
-        raise HTTPException(status_code=400, detail="Cannot checkout free plan")
-    
-    # Get or create Stripe customer
-    customer_id = await _get_or_create_stripe_customer(user_id, session)
-    
-    # Build description - only show credits (that's what gets deducted)
-    credits = plan.get("credits", {})
-    credits_included = credits.get("included", 75000)
-    
-    description = f"{credits_included:,} credits/month. Use credits for chat, agents, code execution, workflows, and more."
-    
-    try:
-        # Create checkout with dynamic price_data (correct description from our config)
-        checkout_session = stripe.checkout.Session.create(
-            customer=customer_id,
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {
-                        "name": f"ResonantGenesis {plan.get('name', 'Plus')}",
-                        "description": description,
-                    },
-                    "unit_amount": int(amount * 100),  # Stripe uses cents
-                    "recurring": {
-                        "interval": interval,
-                    },
-                },
-                "quantity": 1,
-            }],
-            mode="subscription",
-            success_url=request.success_url or f"{settings.FRONTEND_URL}/billing?success=true&plan={request.plan_id}",
-            cancel_url=request.cancel_url or f"{settings.FRONTEND_URL}/billing?canceled=true",
-            metadata={
-                "user_id": user_id,
-                "plan_id": request.plan_id,
-                "billing_cycle": request.billing_cycle,
-                "type": "subscription",
-            },
-        )
-        
-        return {
-            "checkout_url": checkout_session.url,
-            "session_id": checkout_session.id,
-            "plan": plan,
         }
     except stripe.error.StripeError as e:
         logger.error(f"Stripe checkout error: {e}")
