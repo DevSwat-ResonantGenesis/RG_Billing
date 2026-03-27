@@ -93,7 +93,7 @@ def get_user_role(x_user_role: str = Header(None)) -> str:
 # Check if user is a platform developer/system/superuser (gets unlimited plan)
 # Superusers (is_superuser=true) also get unlimited access
 def is_dev_user(role: str, is_superuser: bool = False, unlimited_credits: bool = False) -> bool:
-    return role in ["platform_dev", "system", "owner", "platform_owner"] or is_superuser or unlimited_credits
+    return role in ["platform_dev", "system", "platform_owner"] or is_superuser or unlimited_credits
 
 # Helper to get superuser status from header
 def get_is_superuser(x_is_superuser: str = Header(None)) -> bool:
@@ -147,7 +147,7 @@ async def get_subscription(
     
     subscription = await subscription_manager.get_subscription(user_id, session)
     if not subscription:
-        return {"plan": "developer", "status": "active"}
+        return {"plan": "free", "status": "active"}
     return {
         "id": str(subscription.id),
         "plan": subscription.plan,
@@ -291,7 +291,7 @@ async def get_credits_balance_by_id(
     Superusers and dev users get unlimited credits.
     Developer tier users start with 15000 credits.
     """
-    FREE_TIER_CREDITS = 15000
+    FREE_TIER_CREDITS = 0
     
     # Check if target user is superuser/dev/unlimited_credits (passed via headers from calling service)
     is_superuser = x_is_superuser == "true"
@@ -311,20 +311,20 @@ async def get_credits_balance_by_id(
         balance_data = await credit_manager.get_balance(target_user_id, session)
         return {
             "user_id": target_user_id,
-            "balance": balance_data.get("balance", FREE_TIER_CREDITS),
+            "balance": balance_data.get("balance", 0),
             "free_tier_limit": FREE_TIER_CREDITS,
-            "has_credits": balance_data.get("balance", FREE_TIER_CREDITS) > 0,
+            "has_credits": balance_data.get("balance", 0) > 0,
             "unlimited": False,
         }
     except Exception:
-        # If user doesn't exist in billing yet, assume they have full free tier credits
+        # If user doesn't exist in billing yet, they have 0 credits (free plan)
         return {
             "user_id": target_user_id,
-            "balance": FREE_TIER_CREDITS,
+            "balance": 0,
             "free_tier_limit": FREE_TIER_CREDITS,
-            "has_credits": True,
+            "has_credits": False,
             "unlimited": False,
-            "note": "New user - full free tier credits"
+            "note": "New user - free plan, 0 credits"
         }
 
 
@@ -385,17 +385,17 @@ async def deduct_credits(
             "balance_after": transaction.balance_after,
         }
     except ValueError as e:
-        plan = "developer"
+        plan = "free"
         try:
             subscription = await subscription_manager.get_subscription(user_id, session)
             if subscription and getattr(subscription, "plan", None):
                 plan = subscription.plan
             else:
-                plan = "developer"
+                plan = "free"
         except Exception:
-            plan = "developer"
+            plan = "free"
 
-        plan_normalized = (plan or "developer").strip().lower()
+        plan_normalized = (plan or "free").strip().lower()
         if plan_normalized in {"developer", "free"}:
             action_url = "/pricing"
             detail_msg = "Credits exhausted. Upgrade to Plus to get more credits."
@@ -570,9 +570,9 @@ async def get_usage_metrics(
     if is_dev_user(user_role, is_superuser, unlimited_credits):
         plan = "unlimited"
     else:
-        plan = subscription.plan if subscription else "developer"
+        plan = subscription.plan if subscription else "free"
     
-    # Plan limits matching frontend PLAN_LIMITS - 3 tiers: developer, plus, enterprise
+    # Plan limits matching frontend PLAN_LIMITS - 4 tiers: free, developer, plus, enterprise
     plan_limits = {
         "unlimited": {"tokens": -1, "agents": -1, "teams": -1, "memory": -1, "users": -1, "conversations": -1, "credits": -1},
         "enterprise": {"tokens": -1, "agents": -1, "teams": -1, "memory": -1, "users": -1, "conversations": -1, "credits": -1},
@@ -580,9 +580,9 @@ async def get_usage_metrics(
         "professional": {"tokens": 5000000, "agents": 20, "teams": 5, "memory": 100, "users": 5, "conversations": 1000, "credits": 75000},  # Legacy alias -> plus
         "pro": {"tokens": 5000000, "agents": 20, "teams": 5, "memory": 100, "users": 5, "conversations": 1000, "credits": 75000},  # Legacy alias -> plus
         "developer": {"tokens": 100000, "agents": 3, "teams": 0, "memory": 5, "users": 1, "conversations": 1000, "credits": 1000},
-        "free": {"tokens": 100000, "agents": 3, "teams": 0, "memory": 5, "users": 1, "conversations": 1000, "credits": 1000},  # Legacy alias -> developer
+        "free": {"tokens": 0, "agents": 0, "teams": 0, "memory": 0, "users": 1, "conversations": 0, "credits": 0},
     }
-    limits = plan_limits.get(plan, plan_limits["developer"])
+    limits = plan_limits.get(plan, plan_limits["free"])
     
     tokens_limit = limits["tokens"]
     agents_limit = limits["agents"]
@@ -725,8 +725,8 @@ async def get_usage_metrics(
             "limit": limits["credits"],
         },
         "billing": {
-            "planId": plan if plan != "free" else "developer",
-            "planName": "Developer" if plan in ["free", "developer"] else plan.replace("_", " ").title(),
+            "planId": plan,
+            "planName": "Free" if plan == "free" else ("Developer" if plan == "developer" else plan.replace("_", " ").title()),
             "billingPeriod": subscription.billing_cycle if subscription else "monthly",
             "currentPeriodStart": subscription.current_period_start.isoformat() if subscription and subscription.current_period_start else "",
             "currentPeriodEnd": subscription.current_period_end.isoformat() if subscription and subscription.current_period_end else "",
@@ -1405,7 +1405,7 @@ async def _get_dashboard_data(user_id: str, user_role: str, session: AsyncSessio
         plan = "unlimited"
         status = "active"
     else:
-        plan = subscription.plan if subscription else "developer"
+        plan = subscription.plan if subscription else "free"
         status = subscription.status if subscription else "active"
     
     balance_data = await credit_manager.get_balance(user_id, session)
@@ -1420,13 +1420,13 @@ async def _get_dashboard_data(user_id: str, user_role: str, session: AsyncSessio
         delta = subscription.current_period_end - now
         days_remaining = max(0, delta.days)
     else:
-        # For developer tier: days until end of current month
+        # For free tier: days until end of current month
         _, days_in_month = calendar.monthrange(now.year, now.month)
         days_remaining = days_in_month - now.day
     
     # Get tier credits limit from pricing config
     from .pricing_loader import get_plan_credits
-    tier_credits = get_plan_credits(plan.lower() if plan else "developer")
+    tier_credits = get_plan_credits(plan.lower() if plan else "free")
     
     # Calculate usage this period
     usage_this_period = usage.get("usage", {}).get("tokens", {}).get("quantity", 0) if usage else 0

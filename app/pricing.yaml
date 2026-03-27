@@ -127,6 +127,28 @@ credit_costs:
 # ============================================================
 
 plans:
+  free:
+    id: free
+    name: Free
+    price:
+      monthly: 0
+      yearly: 0
+    credits:
+      included: 0
+      rollover: false
+      topups: false
+    credit_rate: 0
+    limits:
+      users: 1
+      teams: 0
+      org_features: false
+      agents: 0
+      autonomous_mode: false
+      conversations: 0
+      messages_per_day: 0
+      compute_hours: 0
+      storage_mb: 0
+
   developer:
     id: developer
     name: Developer
@@ -247,7 +269,7 @@ credit_packs:
 # ============================================================
 
 tier_mappings:
-  free: developer          # Legacy: free tier no longer exists
+  free: free
   developer: developer
   plus: plus
   pro: plus
