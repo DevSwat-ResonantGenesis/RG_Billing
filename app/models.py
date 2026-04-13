@@ -234,6 +234,44 @@ class PricingPlan(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class PromoCode(Base):
+    """Promotional codes that grant credits to any user (including free plan)."""
+    __tablename__ = "promo_codes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Code identity
+    code = Column(String(64), unique=True, index=True, nullable=False)
+    description = Column(Text, nullable=True)
+    
+    # Credit grant
+    credits = Column(Integer, nullable=False)  # Number of credits to grant
+    expires_in_days = Column(Integer, nullable=True)  # If set, credits expire after N days
+    
+    # Validity
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_until = Column(DateTime(timezone=True), nullable=True)
+    max_redemptions = Column(Integer, nullable=True)  # Global max uses (null = unlimited)
+    max_per_user = Column(Integer, default=1)  # Max uses per user
+    redemption_count = Column(Integer, default=0)
+    
+    # Status
+    is_active = Column(Boolean, default=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PromoRedemption(Base):
+    """Tracks which users redeemed which promo codes."""
+    __tablename__ = "promo_redemptions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    promo_code_id = Column(UUID(as_uuid=True), index=True, nullable=False)
+    user_id = Column(UUID(as_uuid=True), index=True, nullable=False)
+    credits_granted = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Coupon(Base):
     """Discount coupons."""
     __tablename__ = "coupons"

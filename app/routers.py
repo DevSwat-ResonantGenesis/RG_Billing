@@ -26,7 +26,7 @@ try:
 except ImportError:
     CRYPTO_IDENTITY_AVAILABLE = False
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 logger = logging.getLogger(__name__)
 
@@ -2138,6 +2138,144 @@ async def get_customer_portal(
     except stripe.error.StripeError as e:
         logger.error(f"Stripe portal error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+class RedeemPromoRequest(BaseModel):
+    code: str
+
+
+class CreatePromoRequest(BaseModel):
+    code: str
+    credits: int
+    description: Optional[str] = None
+    expires_in_days: Optional[int] = None
+    valid_until: Optional[str] = None  # ISO datetime string
+    max_redemptions: Optional[int] = None
+    max_per_user: int = 1
+
+
+@router.post("/promo/redeem")
+async def redeem_promo_code(
+    request: RedeemPromoRequest,
+    user_id: str = Depends(get_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    """Redeem a promo code to receive credits. Works for any user including free plan."""
+    from .models import PromoCode, PromoRedemption
+
+    code = request.code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Promo code is required")
+
+    # Find promo code
+    result = await session.execute(
+        select(PromoCode).where(PromoCode.code == code)
+    )
+    promo = result.scalar_one_or_none()
+
+    if not promo:
+        raise HTTPException(status_code=404, detail="Invalid promo code")
+    if not promo.is_active:
+        raise HTTPException(status_code=400, detail="This promo code is no longer active")
+
+    now = datetime.utcnow()
+    if promo.valid_from and now < promo.valid_from.replace(tzinfo=None):
+        raise HTTPException(status_code=400, detail="This promo code is not yet active")
+    if promo.valid_until and now > promo.valid_until.replace(tzinfo=None):
+        raise HTTPException(status_code=400, detail="This promo code has expired")
+    if promo.max_redemptions is not None and promo.redemption_count >= promo.max_redemptions:
+        raise HTTPException(status_code=400, detail="This promo code has reached its maximum redemptions")
+
+    # Check per-user limit
+    user_redemptions_result = await session.execute(
+        select(func.count(PromoRedemption.id)).where(
+            PromoRedemption.promo_code_id == promo.id,
+            PromoRedemption.user_id == user_id,
+        )
+    )
+    user_count = user_redemptions_result.scalar() or 0
+    if user_count >= promo.max_per_user:
+        raise HTTPException(status_code=400, detail="You have already redeemed this promo code")
+
+    # Grant credits
+    tx = await credit_manager.grant_bonus_credits(
+        user_id=user_id,
+        amount=promo.credits,
+        reason=f"Promo code: {code}" + (f" — {promo.description}" if promo.description else ""),
+        expires_in_days=promo.expires_in_days,
+        db_session=session,
+    )
+
+    # Record redemption
+    redemption = PromoRedemption(
+        promo_code_id=promo.id,
+        user_id=user_id,
+        credits_granted=promo.credits,
+    )
+    session.add(redemption)
+    promo.redemption_count += 1
+    await session.commit()
+
+    logger.info(f"Promo code {code} redeemed by user {user_id[:8]}... — {promo.credits} credits granted")
+
+    return {
+        "status": "success",
+        "credits_granted": promo.credits,
+        "new_balance": tx.balance_after,
+        "description": promo.description or f"{promo.credits} bonus credits",
+    }
+
+
+@router.post("/promo/create")
+async def create_promo_code(
+    request: CreatePromoRequest,
+    user_id: str = Depends(get_user_id),
+    user_role: str = Depends(get_user_role),
+    is_superuser: bool = Depends(get_is_superuser),
+    session: AsyncSession = Depends(get_session),
+):
+    """Create a new promo code (admin/superuser only)."""
+    from .models import PromoCode
+
+    if not is_dev_user(user_role, is_superuser):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    code = request.code.strip().upper()
+
+    # Check for existing code
+    existing = await session.execute(select(PromoCode).where(PromoCode.code == code))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Promo code already exists")
+
+    valid_until = None
+    if request.valid_until:
+        try:
+            valid_until = datetime.fromisoformat(request.valid_until)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid valid_until date format")
+
+    promo = PromoCode(
+        code=code,
+        credits=request.credits,
+        description=request.description,
+        expires_in_days=request.expires_in_days,
+        valid_until=valid_until,
+        max_redemptions=request.max_redemptions,
+        max_per_user=request.max_per_user,
+    )
+    session.add(promo)
+    await session.commit()
+    await session.refresh(promo)
+
+    logger.info(f"Promo code created: {code} ({request.credits} credits)")
+
+    return {
+        "status": "created",
+        "code": code,
+        "credits": request.credits,
+        "max_redemptions": request.max_redemptions,
+        "max_per_user": request.max_per_user,
+    }
 
 
 async def _get_or_create_stripe_customer(user_id: str, session: AsyncSession) -> str:
