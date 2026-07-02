@@ -1740,6 +1740,16 @@ async def create_checkout_session(
                 'plan_id': request.plan_id,
                 'billing_cycle': request.billing_cycle,
                 'type': 'subscription',
+                'product': plan.get('product', 'account'),
+            },
+            # Propagate to the subscription so every recurring invoice carries the
+            # plan — lets invoice.paid grant the right monthly credit allocation.
+            subscription_data={
+                'metadata': {
+                    'user_id': user_id,
+                    'plan_id': request.plan_id,
+                    'product': plan.get('product', 'account'),
+                },
             },
         )
         

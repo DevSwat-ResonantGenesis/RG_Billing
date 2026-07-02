@@ -107,6 +107,65 @@ def get_price_id_for_tier(tier: SubscriptionTier, billing_cycle: str = "monthly"
 # WEBHOOK HANDLERS
 # ============================================
 
+def _is_memory_api_plan(plan_id: str) -> bool:
+    """True if plan_id resolves to a Memory API product plan in pricing.yaml."""
+    try:
+        from .pricing_loader import get_plan
+        plan = get_plan(plan_id)
+        return bool(plan and plan.get("product") == "memory_api")
+    except Exception:
+        # Fall back to the naming convention if pricing.yaml can't be read.
+        return plan_id.lower().startswith(("hash_sphere_memory", "memory_"))
+
+
+async def _grant_memory_api_plan(
+    session: AsyncSession,
+    user_id: UUID,
+    plan_id: str,
+    subscription_id: Optional[str] = None,
+) -> Optional[UserEconomicState]:
+    """Grant a Memory API plan's monthly credit allocation WITHOUT changing the
+    user's account subscription tier. Credits are the metered Memory Units the
+    gateway deducts per call. Idempotent-ish: adds one interval's allocation."""
+    from .pricing_loader import get_plan
+    plan = get_plan(plan_id)
+    if not plan:
+        logger.error(f"Memory API grant: plan '{plan_id}' not found")
+        return None
+
+    included = int(plan.get("credits", {}).get("included", 0) or 0)
+
+    result = await session.execute(
+        select(UserEconomicState)
+        .where(UserEconomicState.user_id == user_id)
+        .with_for_update()  # single-writer invariant
+    )
+    state = result.scalar_one_or_none()
+    if not state:
+        logger.error(f"No economic state found for user {user_id}")
+        return None
+
+    if included < 0:
+        # Enterprise / unlimited — flag generously; keep account tier intact.
+        state.credit_balance = max(state.credit_balance, 100_000_000)
+    elif included > 0:
+        state.credit_balance += included
+
+    # Record the memory subscription so renewals map back to this plan.
+    if subscription_id:
+        state.subscription_id = subscription_id
+    state.subscription_source = SubscriptionSource.STRIPE
+    state.subscription_status = SubscriptionStatus.ACTIVE
+
+    await session.commit()
+    await session.refresh(state)
+    logger.info(
+        f"User {user_id} purchased Memory API plan '{plan_id}' "
+        f"→ +{included} credits (balance {state.credit_balance})"
+    )
+    return state
+
+
 async def handle_checkout_completed(
     session: AsyncSession,
     event_data: Dict[str, Any],
@@ -144,15 +203,33 @@ async def handle_checkout_completed(
     
     # Determine tier: check metadata first (dynamic price_data), then price_id mapping
     plan_id = metadata.get("plan_id") or metadata.get("plan")
-    
+
+    # ── Memory API product: grant credits, DO NOT touch account tier ──
+    # Memory API plans are a metered add-on product (credits = Memory Units),
+    # bought standalone and consumed via per-call deduction at the gateway.
+    # Mapping them onto subscription_tier would clobber the buyer's real plan.
+    if plan_id and _is_memory_api_plan(plan_id):
+        return await _grant_memory_api_plan(
+            session, user_id, plan_id, subscription_id=checkout_session.get("subscription")
+        )
+
     if plan_id:
-        # Dynamic price_data checkout — tier comes from metadata
+        # Dynamic price_data checkout — tier comes from metadata.
+        # Only recognised ACCOUNT tiers change subscription_tier; anything else
+        # (e.g. a future product plan) is left untouched rather than silently
+        # downgraded to DEVELOPER.
         tier_name_map = {
             "developer": SubscriptionTier.DEVELOPER,
             "plus": SubscriptionTier.PLUS,
             "enterprise": SubscriptionTier.ENTERPRISE,
         }
-        new_tier = tier_name_map.get(plan_id.lower(), SubscriptionTier.DEVELOPER)
+        new_tier = tier_name_map.get(plan_id.lower())
+        if new_tier is None:
+            logger.warning(
+                f"checkout.session.completed: unknown plan_id '{plan_id}' — "
+                f"leaving account tier unchanged"
+            )
+            return None
     else:
         # Fixed price_id checkout — map from Stripe price ID
         line_items = checkout_session.get("line_items", {}).get("data", [])
@@ -410,17 +487,37 @@ async def handle_invoice_paid(
         
         logger.info(f"User {state.user_id} payment received, status restored to active")
     
+    # ── Memory API product: allocate the plan's Memory Units, not tier credits ──
+    # The subscription carries plan_id/product metadata (set at checkout), which
+    # Stripe reflects onto each invoice under subscription_details.metadata.
+    sub_meta = (invoice.get("subscription_details") or {}).get("metadata") or {}
+    mem_plan_id = sub_meta.get("plan_id")
+    if sub_meta.get("product") == "memory_api" and mem_plan_id:
+        from .pricing_loader import get_plan
+        plan = get_plan(mem_plan_id)
+        included = int((plan or {}).get("credits", {}).get("included", 0) or 0)
+        if included < 0:
+            state.credit_balance = max(state.credit_balance, 100_000_000)
+        elif included > 0:
+            state.credit_balance += included
+        logger.info(
+            f"User {state.user_id} Memory API '{mem_plan_id}' renewal → +{included} credits"
+        )
+        await session.commit()
+        await session.refresh(state)
+        return state
+
     # Add monthly credit allocation based on tier
     # TIER_DEFAULTS credit_balance is already the monthly amount (15K dev, 499K plus)
     monthly_credits = TIER_DEFAULTS[state.subscription_tier]["credit_balance"]
-    
+
     if monthly_credits > 0:
         state.credit_balance += monthly_credits
         logger.info(f"User {state.user_id} received {monthly_credits} monthly credits")
-    
+
     await session.commit()
     await session.refresh(state)
-    
+
     return state
 
 
