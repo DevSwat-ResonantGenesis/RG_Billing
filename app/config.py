@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = os.getenv("BILLING_ENVIRONMENT", "development")
     
     # Frontend URL (for checkout redirects)
-    FRONTEND_URL: str = os.getenv("BILLING_FRONTEND_URL", "https://dev-swat.com")
+    FRONTEND_URL: str = os.getenv("BILLING_FRONTEND_URL", "https://resonant.dev-swat.com")
     
     # Stripe configuration
     STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
