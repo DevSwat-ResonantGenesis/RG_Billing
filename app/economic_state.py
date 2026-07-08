@@ -31,7 +31,7 @@ from .db import Base
 
 class SubscriptionTier(str, PyEnum):
     """The ONLY valid subscription tiers. Matches frontend signupLogic.ts PLANS."""
-    DEVELOPER = "developer"    # $15/month
+    DEVELOPER = "developer"    # $29/month
     PLUS = "plus"              # $499/month
     ENTERPRISE = "enterprise"  # Custom pricing
     
@@ -73,8 +73,8 @@ class EnforcementMode(str, PyEnum):
 
 TIER_PRICING = {
     SubscriptionTier.DEVELOPER: {
-        "monthly_price": 15,
-        "yearly_price": 150,
+        "monthly_price": 29,
+        "yearly_price": 290,
         "stripe_price_id_monthly": None,
         "stripe_price_id_yearly": None,
     },
@@ -103,7 +103,7 @@ CREDIT_RATES = {
 }
 
 TIER_DEFAULTS = {
-    # Developer - $15/month (15K credits/month)
+    # Developer - $29/month (15K credits/month)
     # ONLY credits control usage - NO quantity limits
     SubscriptionTier.DEVELOPER: {
         "credit_balance": 15_000,

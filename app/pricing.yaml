@@ -154,8 +154,8 @@ plans:
     name: Developer
     # No stripe_price_id needed - we use dynamic price_data
     price:
-      monthly: 15
-      yearly: 150
+      monthly: 29
+      yearly: 290
     credits:
       included: 15000
       rollover: false

@@ -572,17 +572,24 @@ async def get_usage_metrics(
     else:
         plan = subscription.plan if subscription else "free"
     
-    # Plan limits matching frontend PLAN_LIMITS - 4 tiers: free, developer, plus, enterprise
-    plan_limits = {
-        "unlimited": {"tokens": -1, "agents": -1, "teams": -1, "memory": -1, "users": -1, "conversations": -1, "credits": -1},
-        "enterprise": {"tokens": -1, "agents": -1, "teams": -1, "memory": -1, "users": -1, "conversations": -1, "credits": -1},
-        "plus": {"tokens": 5000000, "agents": 20, "teams": 5, "memory": 100, "users": 5, "conversations": 1000, "credits": 75000},
-        "professional": {"tokens": 5000000, "agents": 20, "teams": 5, "memory": 100, "users": 5, "conversations": 1000, "credits": 75000},  # Legacy alias -> plus
-        "pro": {"tokens": 5000000, "agents": 20, "teams": 5, "memory": 100, "users": 5, "conversations": 1000, "credits": 75000},  # Legacy alias -> plus
-        "developer": {"tokens": 100000, "agents": 3, "teams": 0, "memory": 5, "users": 1, "conversations": 1000, "credits": 1000},
-        "free": {"tokens": 0, "agents": 0, "teams": 0, "memory": 0, "users": 1, "conversations": 0, "credits": 0},
-    }
-    limits = plan_limits.get(plan, plan_limits["free"])
+    # Plan limits read from pricing.yaml (the canonical source, see pricing_loader.py)
+    # instead of a separately hardcoded copy that drifts out of sync with real pricing.
+    from .pricing_loader import get_plan as _get_pricing_plan
+
+    if plan in ("unlimited", "enterprise"):
+        limits = {"tokens": -1, "agents": -1, "teams": -1, "memory": -1, "users": -1, "conversations": -1, "credits": -1}
+    else:
+        _cfg = _get_pricing_plan(plan) or _get_pricing_plan("developer") or {}
+        _lim = _cfg.get("limits", {}) or {}
+        limits = {
+            "tokens": -1,  # credits-only billing; tokens aren't separately capped
+            "agents": _lim.get("agents", -1),
+            "teams": _lim.get("teams", 0),
+            "memory": _lim.get("storage_mb", -1),
+            "users": _lim.get("users", 1),
+            "conversations": _lim.get("conversations", -1),
+            "credits": _cfg.get("credits", {}).get("included", 0),
+        }
     
     tokens_limit = limits["tokens"]
     agents_limit = limits["agents"]
