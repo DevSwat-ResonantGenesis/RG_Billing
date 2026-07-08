@@ -151,13 +151,13 @@ plans:
 
   developer:
     id: developer
-    name: Developer
+    name: Plus  # displayed as "Plus" (id kept as "developer" for backward compatibility)
     # No stripe_price_id needed - we use dynamic price_data
     price:
       monthly: 29
       yearly: 290
     credits:
-      included: 15000
+      included: 29000
       rollover: false
       topups: true
     credit_rate: 1.0            # Full price
@@ -174,7 +174,7 @@ plans:
 
   plus:
     id: plus
-    name: Plus
+    name: Business  # displayed as "Business" (id kept as "plus" for backward compatibility)
     # No stripe_price_id needed - we use dynamic price_data
     price:
       monthly: 499

@@ -106,16 +106,16 @@ async def get_billing_dashboard(
             user_id=user_id,
             org_id=user_id,  # Default org_id to user_id
             subscription_tier="developer",
-            credit_balance=15000,  # Developer tier credits (15k/month)
+            credit_balance=29000,  # Developer tier credits (29k/month)
         )
         db.add(state)
         await db.commit()
         await db.refresh(state)
-    
+
     # Get tier defaults
     tier_defaults = TIER_DEFAULTS.get(state.subscription_tier, {})
-    tier_credits = tier_defaults.get("credit_balance", 15000)
-    
+    tier_credits = tier_defaults.get("credit_balance", 29000)
+
     # Get actual credit balance from credit_balances table (where deductions are recorded)
     balance_result = await db.execute(
         select(CreditBalance).where(CreditBalance.user_id == user_id)
@@ -465,7 +465,7 @@ async def get_usage_summary(
     
     # Get tier info
     tier_defaults = TIER_DEFAULTS.get(state.subscription_tier, {})
-    tier_credits = tier_defaults.get("credit_balance", 15000)
+    tier_credits = tier_defaults.get("credit_balance", 29000)
     
     # Get usage for last 30 days
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)

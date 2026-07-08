@@ -103,10 +103,10 @@ CREDIT_RATES = {
 }
 
 TIER_DEFAULTS = {
-    # Developer - $29/month (15K credits/month)
+    # Developer - $29/month (29K credits/month)
     # ONLY credits control usage - NO quantity limits
     SubscriptionTier.DEVELOPER: {
-        "credit_balance": 15_000,
+        "credit_balance": 29_000,
         "credit_rate": 1.0,
         "credit_rollover_max": 0,          # No rollover
         "credit_topup_enabled": True,      # Top-ups enabled

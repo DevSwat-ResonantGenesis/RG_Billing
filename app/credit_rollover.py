@@ -26,8 +26,8 @@ ROLLOVER_LIMITS = {
 
 # Monthly credit allocations by tier
 TIER_CREDITS = {
-    "developer": 15000,
-    "free": 15000,         # Legacy alias -> developer
+    "developer": 29000,
+    "free": 29000,         # Legacy alias -> developer
     "plus": 499000,
     "pro": 499000,         # Legacy alias -> plus
     "enterprise": -1,      # Unlimited

@@ -289,7 +289,7 @@ async def get_credits_balance_by_id(
     if a user has credits remaining for platform key usage.
     
     Superusers and dev users get unlimited credits.
-    Developer tier users start with 15000 credits.
+    Developer tier users start with 29000 credits.
     """
     FREE_TIER_CREDITS = 0
     

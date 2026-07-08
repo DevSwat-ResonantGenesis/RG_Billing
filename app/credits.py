@@ -121,8 +121,8 @@ except ImportError:
 class CreditManager:
     """Manages user credit balances and transactions."""
     
-    # Developer tier starting credits ($15/month)
-    FREE_TIER_CREDITS = 15000
+    # Developer tier starting credits ($29/month)
+    FREE_TIER_CREDITS = 29000
 
     async def get_or_create_balance(
         self,
@@ -132,7 +132,7 @@ class CreditManager:
     ) -> CreditBalance:
         """Get or create credit balance for user.
         
-        New users automatically receive FREE_TIER_CREDITS (15000) as starting balance.
+        New users automatically receive FREE_TIER_CREDITS (29000) as starting balance.
         
         Args:
             user_id: User ID (string or UUID)
