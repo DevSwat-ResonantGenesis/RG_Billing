@@ -37,6 +37,7 @@ from .metering import usage_meter
 from .invoices import invoice_manager
 from .config import settings
 from .models import CreditBalance
+from .models import Subscription
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 dashboard_router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -1627,7 +1628,12 @@ class CreateCheckoutSessionRequest(BaseModel):
     billing_cycle: str = "monthly"
     success_url: Optional[str] = None
     cancel_url: Optional[str] = None
-    trial: bool = False  # Add trial parameter for first month free
+    # Default to True so every checkout path (dashboard, main pricing page,
+    # API client) gets the 30-day free trial when the plan supports one.
+    # The trial is still gated by `trial.enabled` in pricing.yaml, so plans
+    # without a trial block (e.g. Hash Sphere Memory API, enterprise) are
+    # unaffected. Callers can pass trial=False to opt out explicitly.
+    trial: bool = True
 
 
 class StripeCheckoutRequest(BaseModel):
@@ -1736,7 +1742,34 @@ async def create_checkout_session(
         }
         
         if trial_enabled:
-            subscription_data['trial_period_days'] = trial_config.get("duration_days", 30)
+            duration_days = trial_config.get("duration_days", 30)
+            subscription_data['trial_period_days'] = duration_days
+
+            # Stamp the local row immediately so the DB matches Stripe: the
+            # subscription is trialing until trial_end, after which Stripe
+            # charges the full plan price on renewal. We avoid overwriting a
+            # later trial_end if a webhook already set one.
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            subscription_row_trial_end = now + timedelta(days=duration_days)
+
+            result = await session.execute(
+                select(Subscription).where(Subscription.user_id == user_id)
+            )
+            local_sub = result.scalar_one_or_none()
+            if local_sub:
+                local_sub.plan = request.plan_id
+                local_sub.billing_cycle = request.billing_cycle
+                local_sub.status = "trialing"
+                local_sub.trial_start = now
+                if not local_sub.trial_end or local_sub.trial_end < now:
+                    local_sub.trial_end = subscription_row_trial_end
+                local_sub.extra_metadata = {
+                    **(local_sub.extra_metadata or {}),
+                    "trial_source": "checkout",
+                    "trial_duration_days": duration_days,
+                }
+                await session.commit()
         
         # Create checkout with dynamic price_data (works for all tiers)
         checkout_session = stripe.checkout.Session.create(

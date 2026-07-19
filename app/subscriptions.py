@@ -1,5 +1,6 @@
 """Subscription management with Stripe."""
 
+import logging
 import secrets
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -8,8 +9,10 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Subscription, PricingPlan, PaymentMethod
+from .models import Subscription, PricingPlan, PaymentMethod, CreditTransaction
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 # Stripe import with fallback
 try:
@@ -367,9 +370,38 @@ class SubscriptionManager:
             subscription.current_period_end = datetime.fromtimestamp(
                 stripe_sub.get("current_period_end", 0)
             )
-            await db_session.commit()
+
+            # If Stripe created the subscription in `trialing` state, the user
+            # is in their 30-day free window. Grant the plan's monthly credits
+            # now so they can actually use the product during the trial. The
+            # grant is idempotent on the subscription id, so a replayed webhook
+            # or the subsequent `subscription.updated` won't double-grant.
+            stripe_status = stripe_sub.get("status")
+            if stripe_status == "trialing":
+                # Pull plan_id from subscription metadata set at checkout.
+                sub_meta = stripe_sub.get("metadata") or {}
+                plan_id = sub_meta.get("plan_id") or subscription.plan or "developer"
+                subscription.plan = plan_id
+
+                # trial_end from Stripe is the authoritative end-of-trial time.
+                trial_end = stripe_sub.get("trial_end")
+                if trial_end:
+                    subscription.trial_end = datetime.fromtimestamp(trial_end)
+                    subscription.trial_start = datetime.utcnow()
+
+                await db_session.commit()
+
+                await self._grant_plan_credits(
+                    subscription,
+                    reason="trial_start",
+                    reference_id=f"trial:{subscription.stripe_subscription_id}",
+                    db_session=db_session,
+                )
+            else:
+                await db_session.commit()
 
         return {"status": "processed", "event": "subscription.created"}
+
 
     async def _handle_subscription_updated(
         self, data: Dict[str, Any], db_session: AsyncSession
@@ -411,11 +443,139 @@ class SubscriptionManager:
 
         return {"status": "processed", "event": "subscription.deleted"}
 
+    async def _grant_plan_credits(
+        self,
+        subscription: "Subscription",
+        *,
+        reason: str,
+        reference_id: Optional[str] = None,
+        db_session: AsyncSession = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Grant a plan's monthly included credits to the subscriber.
+
+        Used both at trial start (so the user can actually use the product
+        during the free month) and on every `invoice.paid` renewal (so each
+        time Stripe charges them, they receive that month's credit allotment).
+
+        Idempotency: every grant is recorded as a `CreditTransaction` whose
+        `reference_id` is derived from the subscription + billing period, so a
+        replayed webhook or duplicate invoice cannot double-grant. We also
+        fall back to the generic idempotency service keyed on the stripe
+        invoice/subscription id.
+
+        Args:
+            subscription: The user's Subscription row (carries user_id + plan).
+            reason: Human-readable reason ("trial_start", "renewal", ...).
+            reference_id: Stable unique key for this grant (e.g. stripe invoice id
+                or "{sub_id}:{period_end}"). Required for correct idempotency.
+            db_session: DB session.
+
+        Returns:
+            {"granted": int, "tx_id": str} on success, {"skipped": True} when a
+            grant for this reference already exists.
+        """
+        if subscription is None or not subscription.user_id:
+            logger.warning("grant_plan_credits: missing subscription/user_id")
+            return {"skipped": True, "reason": "no_subscription"}
+
+        if not reference_id:
+            # Last-resort key so we never silently double-grant.
+            reference_id = f"sub:{subscription.stripe_subscription_id or subscription.id}"
+
+        # 1) Idempotency via existing CreditTransaction reference_id.
+        #    reference_type marks plan-grant transactions; reference_id is the
+        #    unique period/invoice key.
+        existing = await db_session.execute(
+            select(CreditTransaction).where(
+                CreditTransaction.user_id == subscription.user_id,
+                CreditTransaction.reference_type == "plan_grant",
+                CreditTransaction.reference_id == reference_id,
+            )
+        )
+        if existing.scalar_one_or_none():
+            logger.info(
+                "grant_plan_credits: already granted for ref=%s (user=%s)",
+                reference_id, str(subscription.user_id)[:8],
+            )
+            return {"skipped": True, "reason": "already_granted"}
+
+        # 2) Resolve the plan's included credits from pricing.yaml.
+        from .pricing_loader import get_plan_credits
+        plan_id = subscription.plan or "developer"
+        credits = get_plan_credits(plan_id)
+        if not credits or credits <= 0:
+            logger.info(
+                "grant_plan_credits: plan %s has no included credits (user=%s)",
+                plan_id, str(subscription.user_id)[:8],
+            )
+            return {"skipped": True, "reason": "no_plan_credits"}
+
+        # 3) Grant via credit_manager (row-locked, writes its own tx record).
+        #    We tag our tx with reference_type="plan_grant" + reference_id so
+        #    the check above catches replays. add_credits commits internally.
+        from .credits import credit_manager
+        tx = await credit_manager.add_credits(
+            user_id=str(subscription.user_id),
+            amount=credits,
+            tx_type="bonus",
+            description=f"{plan_id} plan credits — {reason}",
+            reference_type="plan_grant",
+            reference_id=reference_id,
+            db_session=db_session,
+        )
+
+        logger.info(
+            "grant_plan_credits: granted %d credits to user=%s plan=%s reason=%s ref=%s",
+            credits, str(subscription.user_id)[:8], plan_id, reason, reference_id,
+        )
+        return {"granted": credits, "tx_id": str(tx.id)}
+
     async def _handle_invoice_paid(
         self, data: Dict[str, Any], db_session: AsyncSession
     ) -> Dict[str, Any]:
-        """Handle invoice paid event."""
-        return {"status": "processed", "event": "invoice.paid"}
+        """Handle invoice paid event.
+
+        Stripe fires `invoice.paid` whenever a payment succeeds — both the
+        first real charge at the end of a trial AND every subsequent monthly
+        renewal. We grant the plan's included credits for that period here so
+        paying users receive their monthly allotment.
+        """
+        invoice = data.get("object", {})
+        customer_id = invoice.get("customer")
+        invoice_id = invoice.get("id")
+
+        # Locate the local subscription by Stripe customer id.
+        result = await db_session.execute(
+            select(Subscription).where(Subscription.stripe_customer_id == customer_id)
+        )
+        subscription = result.scalar_one_or_none()
+        if not subscription:
+            logger.warning("invoice.paid: no subscription for customer %s", customer_id)
+            return {"status": "processed", "event": "invoice.paid", "granted": False}
+
+        # Refresh period dates from the invoice so the local row stays in sync.
+        ps = invoice.get("period_start")
+        pe = invoice.get("period_end")
+        if ps:
+            subscription.current_period_start = datetime.fromtimestamp(ps)
+        if pe:
+            subscription.current_period_end = datetime.fromtimestamp(pe)
+        if subscription.status == "trialing":
+            # First paid invoice ends the trial window.
+            subscription.status = "active"
+        await db_session.commit()
+
+        # The invoice id is globally unique at Stripe, so it makes a safe
+        # idempotency key for this grant.
+        grant = await self._grant_plan_credits(
+            subscription,
+            reason="renewal",
+            reference_id=f"invoice:{invoice_id}",
+            db_session=db_session,
+        )
+
+        return {"status": "processed", "event": "invoice.paid", "credits": grant}
+
 
     async def _handle_payment_failed(
         self, data: Dict[str, Any], db_session: AsyncSession
