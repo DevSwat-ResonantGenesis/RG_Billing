@@ -2063,16 +2063,25 @@ class CheckoutConsultingWorkshopRequest(BaseModel):
 @router.post("/checkout/consulting-workshop")
 async def create_consulting_workshop_checkout(
     request: CheckoutConsultingWorkshopRequest,
-    user_id: str = Depends(get_user_id),
+    x_user_id: str = Header(None),
+    cookie_user_id: str = Cookie(None),
     session: AsyncSession = Depends(get_session),
 ):
-    """Create Stripe checkout session for consulting workshop one-time payment."""
+    """Create Stripe checkout session for consulting workshop one-time payment (guest checkout allowed)."""
     import stripe
     
     stripe.api_key = settings.STRIPE_SECRET_KEY
     
-    # Get or create Stripe customer
-    customer_id = await _get_or_create_stripe_customer(user_id, session)
+    # Try to get user_id if authenticated, otherwise None for guest checkout
+    user_id = x_user_id or cookie_user_id
+    
+    # Get or create Stripe customer (guest checkout if no user_id)
+    if user_id:
+        customer_id = await _get_or_create_stripe_customer(user_id, session)
+    else:
+        # Create guest customer
+        customer = stripe.Customer.create()
+        customer_id = customer.id
     
     try:
         # Create checkout with dynamic price_data for one-time payment
@@ -2095,7 +2104,7 @@ async def create_consulting_workshop_checkout(
             cancel_url=request.cancel_url or f"{settings.FRONTEND_URL}/pricing?canceled=true",
             metadata={
                 'type': 'consulting_workshop',
-                'user_id': user_id,
+                'user_id': user_id if user_id else 'guest',
                 'amount_usd': str(request.amount_usd),
             },
         )

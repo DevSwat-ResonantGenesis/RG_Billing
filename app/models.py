@@ -297,8 +297,40 @@ class Coupon(Base):
     applies_to_plans = Column(ARRAY(String), nullable=True)
     min_amount = Column(Numeric(precision=10, scale=2), nullable=True)
     first_time_only = Column(Boolean, default=False)
+
+
+class ConsultingWorkshopIntake(Base):
+    """Consulting workshop intake form data - persists across page reloads."""
+    __tablename__ = "consulting_workshop_intakes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     
-    # Status
-    is_active = Column(Boolean, default=True)
+    # Unique session identifier for tracking this specific intake session
+    session_id = Column(String(128), unique=True, index=True, nullable=False)
     
+    # User identification (optional - guest checkouts allowed)
+    user_id = Column(UUID(as_uuid=True), index=True, nullable=True)
+    
+    # Form fields
+    full_name = Column(String(256), nullable=True)
+    title = Column(String(256), nullable=True)
+    company_name = Column(String(256), nullable=True)
+    company_website = Column(String(512), nullable=True)
+    company_email = Column(String(256), nullable=True)
+    product_objective = Column(Text, nullable=True)
+    
+    # Payment status
+    stripe_session_id = Column(String(128), unique=True, index=True, nullable=True)
+    payment_completed = Column(Boolean, default=False)
+    payment_completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Stripe customer ID (for guest checkouts)
+    stripe_customer_id = Column(String(64), nullable=True)
+    
+    # Form metadata (renamed from 'metadata' to avoid SQLAlchemy reserved name)
+    form_metadata = Column(JSON, nullable=True)
+    
+    # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
