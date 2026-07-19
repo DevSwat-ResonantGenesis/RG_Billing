@@ -2054,6 +2054,61 @@ async def create_credits_checkout(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class CheckoutConsultingWorkshopRequest(BaseModel):
+    amount_usd: float
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+
+@router.post("/checkout/consulting-workshop")
+async def create_consulting_workshop_checkout(
+    request: CheckoutConsultingWorkshopRequest,
+    user_id: str = Depends(get_user_id),
+    session: AsyncSession = Depends(get_session),
+):
+    """Create Stripe checkout session for consulting workshop one-time payment."""
+    import stripe
+    
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+    
+    # Get or create Stripe customer
+    customer_id = await _get_or_create_stripe_customer(user_id, session)
+    
+    try:
+        # Create checkout with dynamic price_data for one-time payment
+        checkout_session = stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=["card"],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': 'Product & Architecture Discovery Consulting Workshop',
+                        'description': '1st Week: Technical Pre-Research & Analysis → 2nd Week: High-Intensity Sprint Workshop → Next 30 Days: Dedicated Engineering Advisory Support',
+                    },
+                    'unit_amount': int(request.amount_usd * 100),  # Convert to cents
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url=request.success_url or f"{settings.FRONTEND_URL}/dashboard?workshop_purchased=true",
+            cancel_url=request.cancel_url or f"{settings.FRONTEND_URL}/pricing?canceled=true",
+            metadata={
+                'type': 'consulting_workshop',
+                'user_id': user_id,
+                'amount_usd': str(request.amount_usd),
+            },
+        )
+        
+        return {
+            "checkout_url": checkout_session.url,
+            "session_id": checkout_session.id,
+        }
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe checkout error for consulting workshop: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/webhook")
 async def stripe_webhook(request: Request, session: AsyncSession = Depends(get_session)):
     """Handle Stripe webhooks."""
