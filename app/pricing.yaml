@@ -161,6 +161,10 @@ plans:
       rollover: false
       topups: true
     credit_rate: 1.0            # Full price
+    trial:
+      enabled: true
+      duration_days: 30
+      first_month_free: true
     limits:
       users: 1                  # Single user only
       teams: 0                  # No team features
@@ -187,6 +191,10 @@ plans:
       topup_price: 8            # $8 per 10K credits
       topup_amount: 10000
     credit_rate: 1.0            # Full price
+    trial:
+      enabled: true
+      duration_days: 30
+      first_month_free: true
     limits:
       users: 1                  # Single user only (no teams)
       teams: 0                  # No team features

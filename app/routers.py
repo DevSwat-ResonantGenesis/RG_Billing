@@ -1627,6 +1627,7 @@ class CreateCheckoutSessionRequest(BaseModel):
     billing_cycle: str = "monthly"
     success_url: Optional[str] = None
     cancel_url: Optional[str] = None
+    trial: bool = False  # Add trial parameter for first month free
 
 
 class StripeCheckoutRequest(BaseModel):
@@ -1721,6 +1722,22 @@ async def create_checkout_session(
         credits_included = plan.get("credits", {}).get("included", 0)
         description = f"{credits_included:,} credits/{interval}. Use credits for chat, agents, code execution, workflows, and more."
         
+        # Check if trial is enabled for this plan
+        trial_config = plan.get("trial", {})
+        trial_enabled = trial_config.get("enabled", False) and request.trial
+        
+        # Build subscription data with trial if enabled
+        subscription_data = {
+            'metadata': {
+                'user_id': user_id,
+                'plan_id': request.plan_id,
+                'product': plan.get('product', 'account'),
+            },
+        }
+        
+        if trial_enabled:
+            subscription_data['trial_period_days'] = trial_config.get("duration_days", 30)
+        
         # Create checkout with dynamic price_data (works for all tiers)
         checkout_session = stripe.checkout.Session.create(
             customer=customer_id,
@@ -1748,16 +1765,11 @@ async def create_checkout_session(
                 'billing_cycle': request.billing_cycle,
                 'type': 'subscription',
                 'product': plan.get('product', 'account'),
+                'trial': str(trial_enabled),
             },
             # Propagate to the subscription so every recurring invoice carries the
             # plan — lets invoice.paid grant the right monthly credit allocation.
-            subscription_data={
-                'metadata': {
-                    'user_id': user_id,
-                    'plan_id': request.plan_id,
-                    'product': plan.get('product', 'account'),
-                },
-            },
+            subscription_data=subscription_data,
         )
         
         return {
