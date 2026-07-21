@@ -184,7 +184,6 @@ async def get_subscription(
         "status": subscription.status,
         "current_period_start": subscription.current_period_start.isoformat() if subscription.current_period_start else None,
         "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
-        "trial_end": subscription.trial_end.isoformat() if subscription.trial_end else None,
         "amount": float(subscription.amount) if subscription.amount else None,
         "currency": subscription.currency,
         "credit_balance": credit_balance,
