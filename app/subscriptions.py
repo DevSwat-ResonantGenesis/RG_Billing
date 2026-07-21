@@ -356,7 +356,7 @@ class SubscriptionManager:
         self, data: Dict[str, Any], db_session: AsyncSession
     ) -> Dict[str, Any]:
         """Handle subscription created event."""
-        stripe_sub = data.get("object", {})
+        stripe_sub = data.get("data", {}).get("object", {})
         customer_id = stripe_sub.get("customer")
 
         result = await db_session.execute(
@@ -410,7 +410,7 @@ class SubscriptionManager:
         self, data: Dict[str, Any], db_session: AsyncSession
     ) -> Dict[str, Any]:
         """Handle subscription updated event."""
-        stripe_sub = data.get("object", {})
+        stripe_sub = data.get("data", {}).get("object", {})
         sub_id = stripe_sub.get("id")
 
         result = await db_session.execute(
@@ -431,7 +431,7 @@ class SubscriptionManager:
         self, data: Dict[str, Any], db_session: AsyncSession
     ) -> Dict[str, Any]:
         """Handle subscription deleted event."""
-        stripe_sub = data.get("object", {})
+        stripe_sub = data.get("data", {}).get("object", {})
         sub_id = stripe_sub.get("id")
 
         result = await db_session.execute(
@@ -543,7 +543,7 @@ class SubscriptionManager:
         renewal. We grant the plan's included credits for that period here so
         paying users receive their monthly allotment.
         """
-        invoice = data.get("object", {})
+        invoice = data.get("data", {}).get("object", {})
         customer_id = invoice.get("customer")
         invoice_id = invoice.get("id")
 
@@ -586,7 +586,7 @@ class SubscriptionManager:
         
         Creates or updates subscription from checkout session metadata.
         """
-        session = data.get("object", {})
+        session = data.get("data", {}).get("object", {})
         customer_id = session.get("customer")
         subscription_id = session.get("subscription")
         metadata = session.get("metadata", {})
@@ -656,7 +656,7 @@ class SubscriptionManager:
         
         Sent 3-7 days before invoice is due. Used for notifications.
         """
-        invoice = data.get("object", {})
+        invoice = data.get("data", {}).get("object", {})
         customer_id = invoice.get("customer")
         amount_due = invoice.get("amount_due", 0)
         currency = invoice.get("currency", "usd")
@@ -680,7 +680,7 @@ class SubscriptionManager:
         self, data: Dict[str, Any], db_session: AsyncSession
     ) -> Dict[str, Any]:
         """Handle payment failed event."""
-        invoice = data.get("object", {})
+        invoice = data.get("data", {}).get("object", {})
         customer_id = invoice.get("customer")
 
         result = await db_session.execute(
