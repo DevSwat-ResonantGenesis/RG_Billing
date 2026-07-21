@@ -160,7 +160,7 @@ async def get_subscription(
     
     subscription = await subscription_manager.get_subscription(user_id, session)
     if not subscription:
-        return {"plan": "free", "status": "active", "credit_balance": 0}
+        return {"plan": "developer", "status": "active", "credit_balance": 0}
     
     # Get credit balance from UserEconomicState
     credit_balance = 0
@@ -321,7 +321,6 @@ async def get_credits_balance_by_id(
     Superusers and dev users get unlimited credits.
     Developer tier users start with 29000 credits.
     """
-    FREE_TIER_CREDITS = 0
     
     # Check if target user is superuser/dev/unlimited_credits (passed via headers from calling service)
     is_superuser = x_is_superuser == "true"
@@ -332,7 +331,6 @@ async def get_credits_balance_by_id(
         return {
             "user_id": target_user_id,
             "balance": 999999999,
-            "free_tier_limit": FREE_TIER_CREDITS,
             "has_credits": True,
             "unlimited": True,
         }
@@ -342,19 +340,17 @@ async def get_credits_balance_by_id(
         return {
             "user_id": target_user_id,
             "balance": balance_data.get("balance", 0),
-            "free_tier_limit": FREE_TIER_CREDITS,
             "has_credits": balance_data.get("balance", 0) > 0,
             "unlimited": False,
         }
     except Exception:
-        # If user doesn't exist in billing yet, they have 0 credits (free plan)
+        # If user doesn't exist in billing yet, they have 0 credits
         return {
             "user_id": target_user_id,
             "balance": 0,
-            "free_tier_limit": FREE_TIER_CREDITS,
             "has_credits": False,
             "unlimited": False,
-            "note": "New user - free plan, 0 credits"
+            "note": "New user - 0 credits"
         }
 
 
@@ -415,18 +411,18 @@ async def deduct_credits(
             "balance_after": transaction.balance_after,
         }
     except ValueError as e:
-        plan = "free"
+        plan = "developer"
         try:
             subscription = await subscription_manager.get_subscription(user_id, session)
             if subscription and getattr(subscription, "plan", None):
                 plan = subscription.plan
             else:
-                plan = "free"
+                plan = "developer"
         except Exception:
-            plan = "free"
+            plan = "developer"
 
-        plan_normalized = (plan or "free").strip().lower()
-        if plan_normalized in {"developer", "free"}:
+        plan_normalized = (plan or "developer").strip().lower()
+        if plan_normalized == "developer":
             action_url = "/pricing"
             detail_msg = "Credits exhausted. Upgrade to Plus to get more credits."
         else:
@@ -600,7 +596,7 @@ async def get_usage_metrics(
     if is_dev_user(user_role, is_superuser, unlimited_credits):
         plan = "unlimited"
     else:
-        plan = subscription.plan if subscription else "free"
+        plan = subscription.plan if subscription else "developer"
     
     # Plan limits read from pricing.yaml (the canonical source, see pricing_loader.py)
     # instead of a separately hardcoded copy that drifts out of sync with real pricing.
@@ -738,11 +734,11 @@ async def get_usage_metrics(
         },
         "ragDocuments": {
             "used": rag_documents,
-            "limit": 5 if plan in ["developer", "free"] else (100 if plan in ["plus", "professional", "pro"] else -1),
+            "limit": 5 if plan == "developer" else (100 if plan in ["plus", "professional", "pro"] else -1),
         },
         "computeHours": {
             "used": compute_hours_used,
-            "limit": 10 if plan in ["developer", "free"] else (100 if plan in ["plus", "professional", "pro"] else -1),
+            "limit": 10 if plan == "developer" else (100 if plan in ["plus", "professional", "pro"] else -1),
         },
         "providers": {
             "available": ["openai", "anthropic", "gemini", "groq"],
@@ -763,7 +759,7 @@ async def get_usage_metrics(
         },
         "billing": {
             "planId": plan,
-            "planName": "Free" if plan == "free" else ("Developer" if plan == "developer" else plan.replace("_", " ").title()),
+            "planName": "Developer" if plan == "developer" else plan.replace("_", " ").title(),
             "billingPeriod": subscription.billing_cycle if subscription else "monthly",
             "currentPeriodStart": subscription.current_period_start.isoformat() if subscription and subscription.current_period_start else "",
             "currentPeriodEnd": subscription.current_period_end.isoformat() if subscription and subscription.current_period_end else "",
@@ -1479,13 +1475,13 @@ async def _get_dashboard_data(user_id: str, user_role: str, session: AsyncSessio
         delta = subscription.current_period_end - now
         days_remaining = max(0, delta.days)
     else:
-        # For free tier: days until end of current month
+        # For users without subscription: days until end of current month
         _, days_in_month = calendar.monthrange(now.year, now.month)
         days_remaining = days_in_month - now.day
     
     # Get tier credits limit from pricing config
     from .pricing_loader import get_plan_credits
-    tier_credits = get_plan_credits(plan.lower() if plan else "free")
+    tier_credits = get_plan_credits(plan.lower() if plan else "developer")
     
     # Calculate usage this period
     usage_this_period = usage.get("usage", {}).get("tokens", {}).get("quantity", 0) if usage else 0
@@ -1943,13 +1939,13 @@ async def get_admin_stats(
     No user filtering applied.
     
     IMPORTANT: Revenue and paying_users are ONLY counted from Stripe-confirmed
-    transactions (stripe_payment_intent_id IS NOT NULL). Free credits, bonuses,
-    referrals, and rollovers are tracked separately.
+    transactions (stripe_payment_intent_id IS NOT NULL). Bonus credits, referrals,
+    and rollovers are tracked separately.
     """
     from sqlalchemy import select, func
     from .models import CreditBalance, CreditTransaction, Subscription
     
-    # --- Total credits granted (all sources: free, bonus, purchase, referral) ---
+    # --- Total credits granted (all sources: bonus, purchase, referral) ---
     all_positive_result = await session.execute(
         select(func.sum(CreditTransaction.amount))
         .where(CreditTransaction.amount > 0)
@@ -1964,8 +1960,8 @@ async def get_admin_stats(
     )
     total_credits_purchased = stripe_purchased_result.scalar() or 0
     
-    # --- Free/bonus credits (everything NOT from Stripe) ---
-    total_credits_free = total_credits_granted - total_credits_purchased
+    # --- Bonus credits (everything NOT from Stripe) ---
+    total_credits_bonus = total_credits_granted - total_credits_purchased
     
     # --- Total credits used (all time) ---
     used_result = await session.execute(
@@ -1993,7 +1989,7 @@ async def get_admin_stats(
     )
     paying_users = paying_users_result.scalar() or 0
     
-    # --- Users who received ANY credits (including free) ---
+    # --- Users who received ANY credits (including bonus) ---
     all_credit_users_result = await session.execute(
         select(func.count(func.distinct(CreditTransaction.user_id)))
         .where(CreditTransaction.amount > 0)
@@ -2003,7 +1999,7 @@ async def get_admin_stats(
     return {
         "total_credits_purchased": total_credits_purchased,
         "total_credits_granted": total_credits_granted,
-        "total_credits_free": total_credits_free,
+        "total_credits_bonus": total_credits_bonus,
         "total_credits_used": total_credits_used,
         "active_subscriptions": active_subscriptions,
         "total_revenue": total_revenue,
@@ -2349,7 +2345,7 @@ async def redeem_promo_code(
     user_id: str = Depends(get_user_id),
     session: AsyncSession = Depends(get_session),
 ):
-    """Redeem a promo code to receive credits. Works for any user including free plan."""
+    """Redeem a promo code to receive credits. Works for any user."""
     from .models import PromoCode, PromoRedemption
 
     code = request.code.strip().upper()

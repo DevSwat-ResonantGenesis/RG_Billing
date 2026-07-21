@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 # Rollover limits by tier (from pricing.yaml)
 ROLLOVER_LIMITS = {
     "developer": 0,        # No rollover for developer tier
-    "free": 0,             # Legacy alias -> developer
     "plus": 249500,        # Up to 249.5K credits (matches pricing.yaml)
     "pro": 249500,         # Legacy alias -> plus
     "enterprise": -1,      # Unlimited rollover
@@ -27,7 +26,6 @@ ROLLOVER_LIMITS = {
 # Monthly credit allocations by tier
 TIER_CREDITS = {
     "developer": 29000,
-    "free": 29000,         # Legacy alias -> developer
     "plus": 499000,
     "pro": 499000,         # Legacy alias -> plus
     "enterprise": -1,      # Unlimited
@@ -113,7 +111,7 @@ class CreditRolloverService:
         """
         rollover_limit = self.get_rollover_limit(tier)
         
-        # No rollover for free tier
+        # No rollover for developer tier
         if rollover_limit == 0:
             return 0, current_balance > 0, 0
         
