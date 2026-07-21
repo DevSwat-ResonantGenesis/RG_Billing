@@ -110,6 +110,9 @@ TIER_DEFAULTS = {
         "credit_rate": 1.0,
         "credit_rollover_max": 0,          # No rollover
         "credit_topup_enabled": True,      # Top-ups enabled
+        "hard_limits": {},                # No hard limits
+        "soft_limits": {},                # No soft limits
+        "features": {},                   # No special features
     },
     
     # Plus - $499/month (499K credits/month)
@@ -120,6 +123,9 @@ TIER_DEFAULTS = {
         "credit_rollover_max": 249_500,    # Rollover up to 249.5K
         "credit_topup_enabled": True,      # Top-ups enabled
         "credit_topup_rate": 8.00,         # $8 per 10,000 credits
+        "hard_limits": {},                # No hard limits
+        "soft_limits": {},                # No soft limits
+        "features": {},                   # No special features
     },
     
     # Enterprise - Custom Pricing (unlimited)
@@ -131,12 +137,31 @@ TIER_DEFAULTS = {
         "credit_topup_enabled": True,
         "credit_topup_rate": 5.00,         # $5 per 10,000 credits (volume discount)
         "custom_runtimes": True,
+        "api_access": True,
+        "blockchain_access": True,
+        "hash_sphere_access": True,
+        "kill_switch": "sla_backed",
+        "invariants": -1,              # Custom invariants
+        "snapshots": -1,               # Unlimited
+        "ai_assistance": "full_custom",
+        "preview_unlimited": True,
+        "sso_saml": True,
+        "on_premise": True,
+        "hybrid_deployment": True,
+        "soc2_hipaa_gdpr": True,
+        "sla_guarantee": "99.9%",
+        "support": "dedicated_engineers",
+        "contact_sales": True,
+        "hard_limits": {},                # No hard limits
+        "soft_limits": {},                # No soft limits
+        "features": {                     # Enterprise features
+            "custom_runtimes": True,
             "api_access": True,
             "blockchain_access": True,
             "hash_sphere_access": True,
             "kill_switch": "sla_backed",
-            "invariants": -1,              # Custom invariants
-            "snapshots": -1,               # Unlimited
+            "invariants": -1,
+            "snapshots": -1,
             "ai_assistance": "full_custom",
             "preview_unlimited": True,
             "sso_saml": True,
@@ -144,8 +169,7 @@ TIER_DEFAULTS = {
             "hybrid_deployment": True,
             "soc2_hipaa_gdpr": True,
             "sla_guarantee": "99.9%",
-        "support": "dedicated_engineers",
-        "contact_sales": True,
+        },
     },
 }
 
