@@ -87,6 +87,14 @@ def get_user_id(x_user_id: str = Header(None), cookie_user_id: str = Cookie(None
         raise HTTPException(status_code=401, detail="User ID required")
     return user_id
 
+# Helper to get user email from header
+def get_user_email(x_user_email: str = Header(None)) -> Optional[str]:
+    return x_user_email
+
+# Helper to get user name from header
+def get_user_name(x_user_name: str = Header(None)) -> Optional[str]:
+    return x_user_name
+
 # Helper to get org_id from header
 def get_org_id(x_org_id: str = Header(None)) -> Optional[str]:
     return x_org_id
@@ -1730,6 +1738,8 @@ async def create_stripe_checkout(
 async def create_checkout_session(
     request: CreateCheckoutSessionRequest,
     user_id: str = Depends(get_user_id),
+    user_email: Optional[str] = Depends(get_user_email),
+    user_name: Optional[str] = Depends(get_user_name),
     org_id: Optional[str] = Depends(get_org_id),
     session: AsyncSession = Depends(get_session),
 ):
@@ -1765,8 +1775,8 @@ async def create_checkout_session(
             # Enterprise or invalid — contact sales
             raise HTTPException(status_code=400, detail="This plan requires contacting sales")
         
-        # Get or create Stripe customer
-        customer_id = await _get_or_create_stripe_customer(user_id, session)
+        # Get or create Stripe customer with user's email and name
+        customer_id = await _get_or_create_stripe_customer(user_id, session, email=user_email, name=user_name)
         
         # Build description
         credits_included = plan.get("credits", {}).get("included", 0)
@@ -2091,6 +2101,8 @@ class CheckoutSubscriptionRequest(BaseModel):
 async def create_credits_checkout(
     request: CheckoutCreditsRequest,
     user_id: str = Depends(get_user_id),
+    user_email: Optional[str] = Depends(get_user_email),
+    user_name: Optional[str] = Depends(get_user_name),
     session: AsyncSession = Depends(get_session),
 ):
     """Create Stripe checkout session for credit pack purchase."""
@@ -2106,8 +2118,8 @@ async def create_credits_checkout(
     if not pack:
         raise HTTPException(status_code=404, detail=f"Credit pack '{request.pack_id}' not found")
     
-    # Get or create Stripe customer
-    customer_id = await _get_or_create_stripe_customer(user_id, session)
+    # Get or create Stripe customer with user's email and name
+    customer_id = await _get_or_create_stripe_customer(user_id, session, email=user_email, name=user_name)
     
     try:
         # Create checkout with dynamic price_data (no pre-configured Stripe products needed)
@@ -2156,6 +2168,8 @@ class CheckoutConsultingWorkshopRequest(BaseModel):
 async def create_consulting_workshop_checkout(
     request: CheckoutConsultingWorkshopRequest,
     x_user_id: str = Header(None),
+    x_user_email: str = Header(None),
+    x_user_name: str = Header(None),
     cookie_user_id: str = Cookie(None),
     session: AsyncSession = Depends(get_session),
 ):
@@ -2169,7 +2183,7 @@ async def create_consulting_workshop_checkout(
     
     # Get or create Stripe customer (guest checkout if no user_id)
     if user_id:
-        customer_id = await _get_or_create_stripe_customer(user_id, session)
+        customer_id = await _get_or_create_stripe_customer(user_id, session, email=x_user_email, name=x_user_name)
     else:
         # Create guest customer
         customer = stripe.Customer.create()
@@ -2293,6 +2307,8 @@ async def stripe_webhook(request: Request, session: AsyncSession = Depends(get_s
 @router.get("/portal")
 async def get_customer_portal(
     user_id: str = Depends(get_user_id),
+    user_email: Optional[str] = Depends(get_user_email),
+    user_name: Optional[str] = Depends(get_user_name),
     session: AsyncSession = Depends(get_session),
 ):
     """Get Stripe Customer Portal URL for managing subscriptions."""
@@ -2300,7 +2316,7 @@ async def get_customer_portal(
     
     stripe.api_key = settings.STRIPE_SECRET_KEY
     
-    customer_id = await _get_or_create_stripe_customer(user_id, session)
+    customer_id = await _get_or_create_stripe_customer(user_id, session, email=user_email, name=user_name)
     
     try:
         portal_session = stripe.billing_portal.Session.create(
@@ -2451,7 +2467,7 @@ async def create_promo_code(
     }
 
 
-async def _get_or_create_stripe_customer(user_id: str, session: AsyncSession) -> str:
+async def _get_or_create_stripe_customer(user_id: str, session: AsyncSession, email: Optional[str] = None, name: Optional[str] = None) -> str:
     """Get existing Stripe customer ID or create new one."""
     import stripe
     from .models import Subscription
@@ -2467,11 +2483,17 @@ async def _get_or_create_stripe_customer(user_id: str, session: AsyncSession) ->
     if subscription and subscription.stripe_customer_id:
         return subscription.stripe_customer_id
     
-    # Create new Stripe customer
+    # Create new Stripe customer with user's email and name
     try:
-        customer = stripe.Customer.create(
-            metadata={"user_id": user_id}
-        )
+        customer_data = {
+            "metadata": {"user_id": user_id}
+        }
+        if email:
+            customer_data["email"] = email
+        if name:
+            customer_data["name"] = name
+        
+        customer = stripe.Customer.create(**customer_data)
         return customer.id
     except stripe.error.StripeError as e:
         logger.error(f"Failed to create Stripe customer: {e}")
