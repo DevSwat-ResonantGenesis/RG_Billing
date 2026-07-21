@@ -87,6 +87,10 @@ def get_user_id(x_user_id: str = Header(None), cookie_user_id: str = Cookie(None
         raise HTTPException(status_code=401, detail="User ID required")
     return user_id
 
+# Helper to get org_id from header
+def get_org_id(x_org_id: str = Header(None)) -> Optional[str]:
+    return x_org_id
+
 # Helper to get user role
 def get_user_role(x_user_role: str = Header(None)) -> str:
     return x_user_role or "user"
@@ -1709,6 +1713,7 @@ async def create_stripe_checkout(
 async def create_checkout_session(
     request: CreateCheckoutSessionRequest,
     user_id: str = Depends(get_user_id),
+    org_id: Optional[str] = Depends(get_org_id),
     session: AsyncSession = Depends(get_session),
 ):
     """Create Stripe checkout session for subscription.
@@ -1758,8 +1763,11 @@ async def create_checkout_session(
         subscription_data = {
             'metadata': {
                 'user_id': user_id,
+                'org_id': org_id,
                 'plan_id': request.plan_id,
                 'product': plan.get('product', 'account'),
+                'billing_cycle': request.billing_cycle,
+                'trial': 'True' if trial_enabled else 'False',
             },
         }
         
