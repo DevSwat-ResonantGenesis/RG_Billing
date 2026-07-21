@@ -148,11 +148,27 @@ async def get_subscription(
     """Get current subscription."""
     # Dev users, superusers, and unlimited_credits users get unlimited plan
     if is_dev_user(user_role, is_superuser, unlimited_credits):
-        return {"plan": "unlimited", "status": "active", "is_dev": True, "unlimited_credits": True}
+        return {"plan": "unlimited", "status": "active", "is_dev": True, "unlimited_credits": True, "credit_balance": -1}
     
     subscription = await subscription_manager.get_subscription(user_id, session)
     if not subscription:
-        return {"plan": "free", "status": "active"}
+        return {"plan": "free", "status": "active", "credit_balance": 0}
+    
+    # Get credit balance from UserEconomicState
+    credit_balance = 0
+    try:
+        from .economic_state import UserEconomicState
+        from sqlalchemy import select
+        import uuid
+        result = await session.execute(
+            select(UserEconomicState).where(UserEconomicState.user_id == uuid.UUID(user_id))
+        )
+        economic_state = result.scalar_one_or_none()
+        if economic_state:
+            credit_balance = economic_state.credit_balance
+    except Exception as e:
+        logger.warning(f"Failed to fetch credit balance: {e}")
+    
     return {
         "id": str(subscription.id),
         "plan": subscription.plan,
@@ -163,6 +179,7 @@ async def get_subscription(
         "trial_end": subscription.trial_end.isoformat() if subscription.trial_end else None,
         "amount": float(subscription.amount) if subscription.amount else None,
         "currency": subscription.currency,
+        "credit_balance": credit_balance,
     }
 
 
