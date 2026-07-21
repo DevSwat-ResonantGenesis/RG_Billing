@@ -1046,25 +1046,23 @@ async def stripe_webhook(
 
     # Convert Stripe event data to dictionary for proper handling
     # Stripe event structure: event.data.object contains the actual event data
+    import json
+    
+    # Always use raw payload as the most reliable source
     try:
-        # Access the raw object from the event
-        stripe_object = event.data.object
-        # Convert to dictionary using Stripe's to_dict() method
-        event_data_dict = stripe_object.to_dict() if hasattr(stripe_object, 'to_dict') else dict(stripe_object)
-    except (AttributeError, TypeError) as e:
-        # Fallback: use the raw payload directly
-        import json
+        raw_payload = json.loads(payload.decode('utf-8'))
+        event_data_dict = raw_payload.get('data', {}).get('object', {})
+    except:
+        # If raw payload fails, try Stripe object conversion
         try:
-            event_data_dict = json.loads(payload.decode('utf-8'))
-            # Extract the data object from the raw JSON
-            event_data_dict = event_data_dict.get('data', {}).get('object', {})
+            stripe_object = event.data.object
+            event_data_dict = stripe_object.to_dict() if hasattr(stripe_object, 'to_dict') else dict(stripe_object)
         except:
             event_data_dict = {}
     
     # Ensure we have a dictionary
     if not isinstance(event_data_dict, dict):
-        import json
-        event_data_dict = json.loads(event_data_dict) if isinstance(event_data_dict, str) else {}
+        event_data_dict = {}
     
     result = await subscription_manager.handle_webhook(
         event_type=event.type,
