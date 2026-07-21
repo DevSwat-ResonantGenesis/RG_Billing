@@ -3,7 +3,7 @@
 import logging
 import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -368,10 +368,10 @@ class SubscriptionManager:
             subscription.stripe_subscription_id = stripe_sub.get("id")
             subscription.status = stripe_sub.get("status")
             subscription.current_period_start = datetime.fromtimestamp(
-                stripe_sub.get("current_period_start", 0)
+                stripe_sub.get("current_period_start", 0), tz=timezone.utc
             )
             subscription.current_period_end = datetime.fromtimestamp(
-                stripe_sub.get("current_period_end", 0)
+                stripe_sub.get("current_period_end", 0), tz=timezone.utc
             )
 
             # If Stripe created the subscription in `trialing` state, the user
@@ -389,8 +389,8 @@ class SubscriptionManager:
                 # trial_end from Stripe is the authoritative end-of-trial time.
                 trial_end = stripe_sub.get("trial_end")
                 if trial_end:
-                    subscription.trial_end = datetime.fromtimestamp(trial_end)
-                    subscription.trial_start = datetime.utcnow()
+                    subscription.trial_end = datetime.fromtimestamp(trial_end, tz=timezone.utc)
+                    subscription.trial_start = datetime.now(timezone.utc)
 
                 await db_session.commit()
 
@@ -421,7 +421,7 @@ class SubscriptionManager:
         if subscription:
             subscription.status = stripe_sub.get("status")
             subscription.current_period_end = datetime.fromtimestamp(
-                stripe_sub.get("current_period_end", 0)
+                stripe_sub.get("current_period_end", 0), tz=timezone.utc
             )
             await db_session.commit()
 
@@ -560,9 +560,9 @@ class SubscriptionManager:
         ps = invoice.get("period_start")
         pe = invoice.get("period_end")
         if ps:
-            subscription.current_period_start = datetime.fromtimestamp(ps)
+            subscription.current_period_start = datetime.fromtimestamp(ps, tz=timezone.utc)
         if pe:
-            subscription.current_period_end = datetime.fromtimestamp(pe)
+            subscription.current_period_end = datetime.fromtimestamp(pe, tz=timezone.utc)
         if subscription.status == "trialing":
             # First paid invoice ends the trial window.
             subscription.status = "active"
@@ -616,8 +616,8 @@ class SubscriptionManager:
             
             # Set trial dates if applicable
             if metadata.get("trial") == "True":
-                subscription.trial_start = datetime.utcnow()
-                subscription.trial_end = datetime.utcnow() + timedelta(days=30)
+                subscription.trial_start = datetime.now(timezone.utc)
+                subscription.trial_end = datetime.now(timezone.utc) + timedelta(days=30)
         else:
             # Create new subscription
             subscription = Subscription(
@@ -631,8 +631,8 @@ class SubscriptionManager:
             
             # Set trial dates if applicable
             if metadata.get("trial") == "True":
-                subscription.trial_start = datetime.utcnow()
-                subscription.trial_end = datetime.utcnow() + timedelta(days=30)
+                subscription.trial_start = datetime.now(timezone.utc)
+                subscription.trial_end = datetime.now(timezone.utc) + timedelta(days=30)
             
             db_session.add(subscription)
         
