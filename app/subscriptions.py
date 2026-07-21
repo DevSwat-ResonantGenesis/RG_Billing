@@ -586,6 +586,8 @@ class SubscriptionManager:
         
         Creates or updates subscription from checkout session metadata.
         """
+        from .economic_state import UserEconomicState, SubscriptionTier, SubscriptionStatus, SubscriptionSource, TIER_DEFAULTS
+        
         session = data.get("data", {}).get("object", {})
         customer_id = session.get("customer")
         subscription_id = session.get("subscription")
@@ -594,12 +596,21 @@ class SubscriptionManager:
         user_id = metadata.get("user_id")
         plan_id = metadata.get("plan_id", "developer")
         billing_cycle = metadata.get("billing_cycle", "monthly")
+        org_id = metadata.get("org_id")
         
         if not user_id:
             logger.error("checkout.session.completed missing user_id in metadata")
             return {"status": "error", "event": "checkout.session.completed", "error": "missing_user_id"}
         
         logger.info(f"Processing checkout for user {user_id}, plan: {plan_id}")
+        
+        # Map plan_id to SubscriptionTier enum
+        tier_map = {
+            "developer": SubscriptionTier.DEVELOPER,
+            "plus": SubscriptionTier.PLUS,
+            "enterprise": SubscriptionTier.ENTERPRISE,
+        }
+        tier_enum = tier_map.get(plan_id.lower(), SubscriptionTier.DEVELOPER)
         
         # Check if subscription already exists for this customer
         result = await db_session.execute(
@@ -635,6 +646,42 @@ class SubscriptionManager:
                 subscription.trial_end = datetime.now(timezone.utc) + timedelta(days=30)
             
             db_session.add(subscription)
+        
+        await db_session.commit()
+        
+        # Create or update UserEconomicState
+        result = await db_session.execute(
+            select(UserEconomicState).where(UserEconomicState.user_id == uuid.UUID(user_id))
+        )
+        economic_state = result.scalar_one_or_none()
+        
+        tier_defaults = TIER_DEFAULTS.get(tier_enum, TIER_DEFAULTS[SubscriptionTier.DEVELOPER])
+        
+        if economic_state:
+            # Update existing state
+            economic_state.subscription_tier = tier_enum
+            economic_state.subscription_status = SubscriptionStatus.ACTIVE
+            economic_state.subscription_source = SubscriptionSource.STRIPE
+            economic_state.subscription_id = subscription_id
+            economic_state.credit_balance = tier_defaults.get("credit_balance", 29_000)
+            economic_state.credit_rate = tier_defaults.get("credit_rate", 1.0)
+        else:
+            # Create new UserEconomicState
+            if not org_id:
+                logger.error("checkout.session.completed missing org_id in metadata")
+                return {"status": "error", "event": "checkout.session.completed", "error": "missing_org_id"}
+            
+            economic_state = UserEconomicState(
+                user_id=uuid.UUID(user_id),
+                org_id=uuid.UUID(org_id),
+                subscription_tier=tier_enum,
+                subscription_status=SubscriptionStatus.ACTIVE,
+                subscription_source=SubscriptionSource.STRIPE,
+                subscription_id=subscription_id,
+                credit_balance=tier_defaults.get("credit_balance", 29_000),
+                credit_rate=tier_defaults.get("credit_rate", 1.0),
+            )
+            db_session.add(economic_state)
         
         await db_session.commit()
         
