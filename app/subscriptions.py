@@ -80,7 +80,7 @@ class SubscriptionManager:
         result = await db_session.execute(
             select(Subscription).where(Subscription.user_id == user_id)
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def create_subscription(
         self,
