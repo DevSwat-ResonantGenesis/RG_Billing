@@ -612,14 +612,16 @@ class SubscriptionManager:
         }
         tier_enum = tier_map.get(plan_id.lower(), SubscriptionTier.DEVELOPER)
         
-        # Check if subscription already exists for this customer
+        # Check if subscription already exists for this user (not customer)
+        # This prevents creating multiple subscriptions for the same user
         result = await db_session.execute(
-            select(Subscription).where(Subscription.stripe_customer_id == customer_id)
+            select(Subscription).where(Subscription.user_id == uuid.UUID(user_id))
         )
         subscription = result.scalars().first()
         
         if subscription:
-            # Update existing subscription
+            # Update existing subscription with new Stripe details
+            subscription.stripe_customer_id = customer_id
             subscription.stripe_subscription_id = subscription_id
             subscription.plan = plan_id
             subscription.billing_cycle = billing_cycle
