@@ -342,6 +342,7 @@ class SubscriptionManager:
             "customer.subscription.updated": self._handle_subscription_updated,
             "customer.subscription.deleted": self._handle_subscription_deleted,
             "invoice.paid": self._handle_invoice_paid,
+            "invoice.payment_succeeded": self._handle_invoice_paid,  # Stripe sends this event
             "invoice.payment_failed": self._handle_payment_failed,
             "checkout.session.completed": self._handle_checkout_completed,
             "invoice.upcoming": self._handle_invoice_upcoming,
