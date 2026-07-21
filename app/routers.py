@@ -2481,7 +2481,24 @@ async def _get_or_create_stripe_customer(user_id: str, session: AsyncSession, em
     subscription = result.scalar_one_or_none()
     
     if subscription and subscription.stripe_customer_id:
-        return subscription.stripe_customer_id
+        customer_id = subscription.stripe_customer_id
+        
+        # Update customer email/name if provided and different from existing
+        if email or name:
+            try:
+                customer = stripe.Customer.retrieve(customer_id)
+                update_data = {}
+                if email and customer.email != email:
+                    update_data["email"] = email
+                if name and customer.name != name:
+                    update_data["name"] = name
+                if update_data:
+                    stripe.Customer.modify(customer_id, **update_data)
+                    logger.info(f"Updated Stripe customer {customer_id} with email/name")
+            except stripe.error.StripeError as e:
+                logger.warning(f"Failed to update Stripe customer {customer_id}: {e}")
+        
+        return customer_id
     
     # Create new Stripe customer with user's email and name
     try:
@@ -2494,6 +2511,7 @@ async def _get_or_create_stripe_customer(user_id: str, session: AsyncSession, em
             customer_data["name"] = name
         
         customer = stripe.Customer.create(**customer_data)
+        logger.info(f"Created new Stripe customer {customer.id} for user {user_id} with email {email}")
         return customer.id
     except stripe.error.StripeError as e:
         logger.error(f"Failed to create Stripe customer: {e}")
