@@ -41,7 +41,7 @@ class SubscriptionManager:
         result = await db_session.execute(
             select(Subscription).where(Subscription.user_id == user_id)
         )
-        subscription = result.scalar_one_or_none()
+        subscription = result.scalars().first()
 
         if subscription and subscription.stripe_customer_id:
             return subscription.stripe_customer_id
@@ -362,7 +362,7 @@ class SubscriptionManager:
         result = await db_session.execute(
             select(Subscription).where(Subscription.stripe_customer_id == customer_id)
         )
-        subscription = result.scalar_one_or_none()
+        subscription = result.scalars().first()
 
         if subscription:
             subscription.stripe_subscription_id = stripe_sub.get("id")
@@ -416,7 +416,7 @@ class SubscriptionManager:
         result = await db_session.execute(
             select(Subscription).where(Subscription.stripe_subscription_id == sub_id)
         )
-        subscription = result.scalar_one_or_none()
+        subscription = result.scalars().first()
 
         if subscription:
             subscription.status = stripe_sub.get("status")
@@ -437,7 +437,7 @@ class SubscriptionManager:
         result = await db_session.execute(
             select(Subscription).where(Subscription.stripe_subscription_id == sub_id)
         )
-        subscription = result.scalar_one_or_none()
+        subscription = result.scalars().first()
 
         if subscription:
             subscription.status = "canceled"
@@ -551,7 +551,7 @@ class SubscriptionManager:
         result = await db_session.execute(
             select(Subscription).where(Subscription.stripe_customer_id == customer_id)
         )
-        subscription = result.scalar_one_or_none()
+        subscription = result.scalars().first()
         if not subscription:
             logger.warning("invoice.paid: no subscription for customer %s", customer_id)
             return {"status": "processed", "event": "invoice.paid", "granted": False}
@@ -616,7 +616,7 @@ class SubscriptionManager:
         result = await db_session.execute(
             select(Subscription).where(Subscription.stripe_customer_id == customer_id)
         )
-        subscription = result.scalar_one_or_none()
+        subscription = result.scalars().first()
         
         if subscription:
             # Update existing subscription
@@ -653,7 +653,7 @@ class SubscriptionManager:
         result = await db_session.execute(
             select(UserEconomicState).where(UserEconomicState.user_id == uuid.UUID(user_id))
         )
-        economic_state = result.scalar_one_or_none()
+        economic_state = result.scalars().first()
         
         tier_defaults = TIER_DEFAULTS.get(tier_enum, TIER_DEFAULTS[SubscriptionTier.DEVELOPER])
         
@@ -733,7 +733,7 @@ class SubscriptionManager:
         result = await db_session.execute(
             select(Subscription).where(Subscription.stripe_customer_id == customer_id)
         )
-        subscription = result.scalar_one_or_none()
+        subscription = result.scalars().first()
 
         if subscription:
             subscription.status = "past_due"
