@@ -89,7 +89,7 @@ class CreditTransaction(Base):
     
     # Reference
     reference_type = Column(String(32), nullable=True)  # agent_run, api_call, token_usage, etc.
-    reference_id = Column(UUID(as_uuid=True), nullable=True)
+    reference_id = Column(String(128), nullable=True)  # Changed from UUID to String to support string references
     
     # Payment reference
     stripe_payment_intent_id = Column(String(64), nullable=True)
