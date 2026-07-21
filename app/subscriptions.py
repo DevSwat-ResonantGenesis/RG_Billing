@@ -2,6 +2,7 @@
 
 import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -341,6 +342,8 @@ class SubscriptionManager:
             "customer.subscription.deleted": self._handle_subscription_deleted,
             "invoice.paid": self._handle_invoice_paid,
             "invoice.payment_failed": self._handle_payment_failed,
+            "checkout.session.completed": self._handle_checkout_completed,
+            "invoice.upcoming": self._handle_invoice_upcoming,
         }
 
         handler = handlers.get(event_type)
@@ -575,6 +578,102 @@ class SubscriptionManager:
         )
 
         return {"status": "processed", "event": "invoice.paid", "credits": grant}
+
+    async def _handle_checkout_completed(
+        self, data: Dict[str, Any], db_session: AsyncSession
+    ) -> Dict[str, Any]:
+        """Handle checkout.session.completed event.
+        
+        Creates or updates subscription from checkout session metadata.
+        """
+        session = data.get("object", {})
+        customer_id = session.get("customer")
+        subscription_id = session.get("subscription")
+        metadata = session.get("metadata", {})
+        
+        user_id = metadata.get("user_id")
+        plan_id = metadata.get("plan_id", "developer")
+        billing_cycle = metadata.get("billing_cycle", "monthly")
+        
+        if not user_id:
+            logger.error("checkout.session.completed missing user_id in metadata")
+            return {"status": "error", "event": "checkout.session.completed", "error": "missing_user_id"}
+        
+        logger.info(f"Processing checkout for user {user_id}, plan: {plan_id}")
+        
+        # Check if subscription already exists for this customer
+        result = await db_session.execute(
+            select(Subscription).where(Subscription.stripe_customer_id == customer_id)
+        )
+        subscription = result.scalar_one_or_none()
+        
+        if subscription:
+            # Update existing subscription
+            subscription.stripe_subscription_id = subscription_id
+            subscription.plan = plan_id
+            subscription.billing_cycle = billing_cycle
+            subscription.status = "trialing" if metadata.get("trial") == "True" else "active"
+            
+            # Set trial dates if applicable
+            if metadata.get("trial") == "True":
+                subscription.trial_start = datetime.utcnow()
+                subscription.trial_end = datetime.utcnow() + timedelta(days=30)
+        else:
+            # Create new subscription
+            subscription = Subscription(
+                user_id=uuid.UUID(user_id),
+                stripe_customer_id=customer_id,
+                stripe_subscription_id=subscription_id,
+                plan=plan_id,
+                billing_cycle=billing_cycle,
+                status="trialing" if metadata.get("trial") == "True" else "active",
+            )
+            
+            # Set trial dates if applicable
+            if metadata.get("trial") == "True":
+                subscription.trial_start = datetime.utcnow()
+                subscription.trial_end = datetime.utcnow() + timedelta(days=30)
+            
+            db_session.add(subscription)
+        
+        await db_session.commit()
+        
+        # Grant trial credits if applicable
+        if metadata.get("trial") == "True":
+            await self._grant_plan_credits(
+                subscription,
+                reason="trial_start",
+                reference_id=f"trial:{subscription_id}",
+                db_session=db_session,
+            )
+        
+        return {"status": "processed", "event": "checkout.session.completed", "subscription_id": subscription_id}
+
+    async def _handle_invoice_upcoming(
+        self, data: Dict[str, Any], db_session: AsyncSession
+    ) -> Dict[str, Any]:
+        """Handle invoice.upcoming event.
+        
+        Sent 3-7 days before invoice is due. Used for notifications.
+        """
+        invoice = data.get("object", {})
+        customer_id = invoice.get("customer")
+        amount_due = invoice.get("amount_due", 0)
+        currency = invoice.get("currency", "usd")
+        due_date = invoice.get("due_date")
+        
+        logger.info(
+            f"Invoice upcoming for customer {customer_id}: {amount_due/100:.2f} {currency.upper()} "
+            f"due on {datetime.fromtimestamp(due_date) if due_date else 'unknown'}"
+        )
+        
+        # This event is typically used for sending notifications to users
+        # For now, we just log it. Future implementation could:
+        # - Send email notifications
+        # - Update user dashboard with upcoming payment info
+        # - Trigger payment method reminders
+        
+        return {"status": "processed", "event": "invoice.upcoming"}
 
 
     async def _handle_payment_failed(
