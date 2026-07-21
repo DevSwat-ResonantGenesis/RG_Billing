@@ -667,9 +667,10 @@ class SubscriptionManager:
             economic_state.credit_rate = tier_defaults.get("credit_rate", 1.0)
         else:
             # Create new UserEconomicState
+            # If org_id is missing, use user_id as fallback (single-user org)
             if not org_id:
-                logger.error("checkout.session.completed missing org_id in metadata")
-                return {"status": "error", "event": "checkout.session.completed", "error": "missing_org_id"}
+                logger.warning("checkout.session.completed missing org_id in metadata, using user_id as fallback")
+                org_id = user_id
             
             economic_state = UserEconomicState(
                 user_id=uuid.UUID(user_id),
