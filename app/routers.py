@@ -1806,8 +1806,8 @@ async def create_checkout_session(
             # subscription is trialing until trial_end, after which Stripe
             # charges the full plan price on renewal. We avoid overwriting a
             # later trial_end if a webhook already set one.
-            from datetime import datetime, timedelta
-            now = datetime.utcnow()
+            from datetime import datetime, timedelta, timezone
+            now = datetime.now(timezone.utc)
             subscription_row_trial_end = now + timedelta(days=duration_days)
 
             result = await session.execute(
