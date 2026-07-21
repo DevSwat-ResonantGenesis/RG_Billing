@@ -1024,8 +1024,10 @@ async def get_invoice_stats(
     return await invoice_manager.get_invoice_stats(user_id, session)
 
 
-# Webhook endpoint
+# Webhook endpoint - support multiple paths for compatibility
 @router.post("/webhook/stripe")
+@router.post("/stripe/webhook")
+@router.post("/billing/stripe/webhook")
 async def stripe_webhook(
     request: Request,
     session: AsyncSession = Depends(get_session),
