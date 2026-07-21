@@ -1,6 +1,7 @@
 """Subscription management with Stripe."""
 
 import logging
+import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -604,6 +605,17 @@ class SubscriptionManager:
         
         logger.info(f"Processing checkout for user {user_id}, plan: {plan_id}")
         
+        # Fetch full subscription details from Stripe to get period dates
+        import stripe
+        stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+        
+        stripe_sub = None
+        if subscription_id:
+            try:
+                stripe_sub = stripe.Subscription.retrieve(subscription_id)
+            except Exception as e:
+                logger.warning(f"Failed to fetch Stripe subscription {subscription_id}: {e}")
+        
         # Map plan_id to SubscriptionTier enum
         tier_map = {
             "developer": SubscriptionTier.DEVELOPER,
@@ -627,26 +639,37 @@ class SubscriptionManager:
             subscription.billing_cycle = billing_cycle
             subscription.status = "trialing" if metadata.get("trial") == "True" else "active"
             
+            # Set period dates from Stripe
+            if stripe_sub:
+                subscription.current_period_start = datetime.fromtimestamp(stripe_sub.current_period_start, tz=timezone.utc) if hasattr(stripe_sub, 'current_period_start') else None
+                subscription.current_period_end = datetime.fromtimestamp(stripe_sub.current_period_end, tz=timezone.utc) if hasattr(stripe_sub, 'current_period_end') else None
+            
             # Set trial dates if applicable
             if metadata.get("trial") == "True":
                 subscription.trial_start = datetime.now(timezone.utc)
                 subscription.trial_end = datetime.now(timezone.utc) + timedelta(days=30)
         else:
             # Create new subscription
-            subscription = Subscription(
-                user_id=uuid.UUID(user_id),
-                stripe_customer_id=customer_id,
-                stripe_subscription_id=subscription_id,
-                plan=plan_id,
-                billing_cycle=billing_cycle,
-                status="trialing" if metadata.get("trial") == "True" else "active",
-            )
+            sub_data = {
+                "user_id": uuid.UUID(user_id),
+                "stripe_customer_id": customer_id,
+                "stripe_subscription_id": subscription_id,
+                "plan": plan_id,
+                "billing_cycle": billing_cycle,
+                "status": "trialing" if metadata.get("trial") == "True" else "active",
+            }
+            
+            # Set period dates from Stripe
+            if stripe_sub:
+                sub_data["current_period_start"] = datetime.fromtimestamp(stripe_sub.current_period_start, tz=timezone.utc) if hasattr(stripe_sub, 'current_period_start') else None
+                sub_data["current_period_end"] = datetime.fromtimestamp(stripe_sub.current_period_end, tz=timezone.utc) if hasattr(stripe_sub, 'current_period_end') else None
             
             # Set trial dates if applicable
             if metadata.get("trial") == "True":
-                subscription.trial_start = datetime.now(timezone.utc)
-                subscription.trial_end = datetime.now(timezone.utc) + timedelta(days=30)
+                sub_data["trial_start"] = datetime.now(timezone.utc)
+                sub_data["trial_end"] = datetime.now(timezone.utc) + timedelta(days=30)
             
+            subscription = Subscription(**sub_data)
             db_session.add(subscription)
         
         await db_session.commit()
