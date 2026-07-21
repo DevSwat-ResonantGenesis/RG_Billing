@@ -1471,9 +1471,9 @@ async def _get_dashboard_data(user_id: str, user_role: str, session: AsyncSessio
     usage = await usage_meter.get_usage_summary(user_id=user_id, db_session=session)
     
     # Calculate days remaining in billing period
-    from datetime import datetime
+    from datetime import datetime, timezone
     import calendar
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     if subscription and subscription.current_period_end:
         delta = subscription.current_period_end - now
