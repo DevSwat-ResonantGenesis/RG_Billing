@@ -1812,7 +1812,7 @@ async def create_checkout_session(
             if local_sub:
                 local_sub.plan = request.plan_id
                 local_sub.billing_cycle = request.billing_cycle
-                local_sub.status = "trialing"
+                local_sub.status = "active"
                 local_sub.trial_start = now
                 if not local_sub.trial_end or local_sub.trial_end < now:
                     local_sub.trial_end = subscription_row_trial_end

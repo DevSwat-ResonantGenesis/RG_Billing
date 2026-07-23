@@ -323,7 +323,7 @@ class SubscriptionManager:
         trial_end = now + timedelta(days=trial_days)
 
         subscription.plan = plan
-        subscription.status = "trialing"
+        subscription.status = "active"
         subscription.trial_start = now
         subscription.trial_end = trial_end
 
@@ -638,7 +638,7 @@ class SubscriptionManager:
             subscription.stripe_subscription_id = subscription_id
             subscription.plan = plan_id
             subscription.billing_cycle = billing_cycle
-            subscription.status = "trialing" if metadata.get("trial") == "True" else "active"
+            subscription.status = "active"
             
             # Set period dates from Stripe
             if stripe_sub:
@@ -657,7 +657,7 @@ class SubscriptionManager:
                 "stripe_subscription_id": subscription_id,
                 "plan": plan_id,
                 "billing_cycle": billing_cycle,
-                "status": "trialing" if metadata.get("trial") == "True" else "active",
+                "status": "active",
             }
             
             # Set period dates from Stripe
