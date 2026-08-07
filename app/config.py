@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # Service URLs
     CRYPTO_SERVICE_URL: str = os.getenv("CRYPTO_SERVICE_URL", "http://crypto_service:8000")
     NOTIFICATION_SERVICE_URL: str = os.getenv("NOTIFICATION_SERVICE_URL", "")
+    AUTH_URL: str = os.getenv("AUTH_URL", "http://auth_service:8000")
+    
+    # Internal service key for HMAC signatures (must match AUTH_INTERNAL_SERVICE_KEY)
+    INTERNAL_SERVICE_KEY: str = os.getenv("INTERNAL_SERVICE_KEY", "")
     
     class Config:
         env_file = ".env"

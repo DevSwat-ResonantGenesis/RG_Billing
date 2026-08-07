@@ -284,33 +284,94 @@ class WebhookProcessor:
 async def handle_checkout_completed(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handle checkout.session.completed event.
-    
-    Creates or upgrades subscription and grants credits.
+
+    Creates or upgrades subscription and grants role based on tier.
+    This is the ONLY code path allowed to upgrade a user's role.
     """
-    from .economic_state import UserEconomicState, SubscriptionTier, TIER_DEFAULTS
-    from .credits import CreditManager
-    
+    import httpx
+    import hmac
+    import hashlib
+    import time
+    import json
+    import uuid
+    from .config import settings
+
     session = payload.get("data", {}).get("object", {})
-    
+
     customer_id = session.get("customer")
     subscription_id = session.get("subscription")
+    client_reference_id = session.get("client_reference_id")  # User ID from checkout
     metadata = session.get("metadata", {})
-    
-    user_id = metadata.get("user_id")
-    tier = metadata.get("tier", "plus")
-    
+
+    # Get user_id from client_reference_id (preferred) or metadata (fallback)
+    user_id = client_reference_id or metadata.get("user_id")
+
     if not user_id:
-        logger.error("checkout.session.completed missing user_id in metadata")
+        logger.error("checkout.session.completed missing user_id in client_reference_id or metadata")
         return {"error": "missing_user_id"}
-    
-    logger.info(f"Processing checkout for user {user_id}, tier: {tier}")
-    
-    # This would be implemented with actual DB operations
-    # For now, return success structure
+
+    # Map Stripe price/tier to role
+    # This mapping should match pricing.yaml plan IDs
+    tier = metadata.get("tier", "developer")  # Default to developer tier
+
+    # Map pricing.yaml tier IDs to role names
+    tier_to_role = {
+        "developer": "plus_plan",      # $29/mo plan -> plus_plan role
+        "plus": "business_plan",      # $499/mo plan -> business_plan role
+        "enterprise": "enterprise_plan",  # Custom -> enterprise_plan role
+    }
+
+    role = tier_to_role.get(tier, "plus_plan")  # Default to plus_plan if unknown
+
+    logger.info(f"Processing checkout for user {user_id}, tier: {tier}, role: {role}")
+
+    # Prepare request body - include user_id to bind signature to specific user
+    request_body = json.dumps({"role": role, "user_id": user_id}).encode()
+    timestamp = str(int(time.time()))
+    nonce = str(uuid.uuid4())  # Generate unique nonce
+
+    # Generate HMAC signature
+    secret = getattr(settings, "INTERNAL_SERVICE_KEY", "").encode()
+    if not secret:
+        logger.error("INTERNAL_SERVICE_KEY not configured")
+        return {"error": "internal_key_missing"}
+
+    signature = hmac.new(
+        secret,
+        request_body + timestamp.encode() + nonce.encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+    # Call Auth service to update user role
+    try:
+        auth_url = getattr(settings, "AUTH_URL", "http://auth_service:8000").rstrip("/")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{auth_url}/auth/users/{user_id}/role",
+                content=request_body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Webhook-Signature": signature,
+                    "X-Webhook-Timestamp": timestamp,
+                    "X-Webhook-Nonce": nonce,
+                }
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Role updated to {role} for user {user_id}")
+            else:
+                logger.error(f"❌ Failed to update role for user {user_id}: {response.text}")
+                return {"error": "role_update_failed", "detail": response.text}
+
+    except Exception as e:
+        logger.error(f"❌ Error calling Auth service for role update: {e}")
+        return {"error": "auth_service_error", "detail": str(e)}
+
     return {
         "action": "subscription_created",
         "user_id": user_id,
         "tier": tier,
+        "role": role,
         "subscription_id": subscription_id,
         "customer_id": customer_id,
     }
@@ -364,42 +425,212 @@ async def handle_invoice_payment_failed(payload: Dict[str, Any]) -> Dict[str, An
 async def handle_subscription_updated(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handle customer.subscription.updated event.
-    
-    Updates tier and adjusts limits.
+
+    Updates tier and adjusts role based on plan changes.
+    Only processes active or trialing subscriptions - past_due, canceled, unpaid are downgraded.
     """
+    import httpx
+    import hmac
+    import hashlib
+    import time
+    import json
+    import uuid
+    from .config import settings
+
     subscription = payload.get("data", {}).get("object", {})
-    
+
     subscription_id = subscription.get("id")
     status = subscription.get("status")
-    
+    metadata = subscription.get("metadata", {})
+    items = subscription.get("items", {}).get("data", [])
+
+    user_id = metadata.get("user_id")
+
     logger.info(f"Subscription updated: {subscription_id}, status={status}")
-    
+
+    # Handle plan changes (downgrade/upgrade)
+    if user_id and items:
+        # Only process active or trialing subscriptions
+        # past_due, canceled, unpaid, incomplete should downgrade to unsubscribed
+        if status not in ("active", "trialing"):
+            logger.info(f"Subscription status {status} is not active - downgrading to unsubscribed")
+            try:
+                # Include user_id in signed payload to bind signature to specific user
+                request_body = json.dumps({"role": "unsubscribed", "user_id": user_id}).encode()
+                timestamp = str(int(time.time()))
+                nonce = str(uuid.uuid4())
+
+                secret = getattr(settings, "INTERNAL_SERVICE_KEY", "").encode()
+                if not secret:
+                    logger.error("INTERNAL_SERVICE_KEY not configured")
+                    return {"error": "internal_key_missing"}
+
+                signature = hmac.new(
+                    secret,
+                    request_body + timestamp.encode() + nonce.encode(),
+                    hashlib.sha256
+                ).hexdigest()
+
+                auth_url = getattr(settings, "AUTH_URL", "http://auth_service:8000").rstrip("/")
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(
+                        f"{auth_url}/auth/users/{user_id}/role",
+                        content=request_body,
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Webhook-Signature": signature,
+                            "X-Webhook-Timestamp": timestamp,
+                            "X-Webhook-Nonce": nonce,
+                        }
+                    )
+
+                    if response.status_code == 200:
+                        logger.info(f"✅ Role downgraded to unsubscribed for user {user_id} (status={status})")
+                    else:
+                        logger.error(f"❌ Failed to downgrade role for user {user_id}: {response.text}")
+
+            except Exception as e:
+                logger.error(f"❌ Error calling Auth service for role downgrade: {e}")
+
+            return {
+                "action": "subscription_updated",
+                "subscription_id": subscription_id,
+                "status": status,
+                "user_id": user_id,
+                "role": "unsubscribed",
+            }
+
+        # Get the price ID from the subscription item (use first item for simplicity)
+        # For multi-item subscriptions, you may need more complex logic
+        price_id = items[0].get("price", {}).get("id") if items else None
+
+        # Map price IDs to tiers (this should be configured based on your Stripe products)
+        # For now, use metadata tier if available
+        tier = metadata.get("tier")
+
+        if tier:
+            tier_to_role = {
+                "developer": "plus_plan",
+                "plus": "business_plan",
+                "enterprise": "enterprise_plan",
+            }
+            role = tier_to_role.get(tier, "plus_plan")
+
+            try:
+                # Include user_id in signed payload to bind signature to specific user
+                request_body = json.dumps({"role": role, "user_id": user_id}).encode()
+                timestamp = str(int(time.time()))
+                nonce = str(uuid.uuid4())
+
+                secret = getattr(settings, "INTERNAL_SERVICE_KEY", "").encode()
+                if not secret:
+                    logger.error("INTERNAL_SERVICE_KEY not configured")
+                    return {"error": "internal_key_missing"}
+
+                signature = hmac.new(
+                    secret,
+                    request_body + timestamp.encode() + nonce.encode(),
+                    hashlib.sha256
+                ).hexdigest()
+
+                auth_url = getattr(settings, "AUTH_URL", "http://auth_service:8000").rstrip("/")
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(
+                        f"{auth_url}/auth/users/{user_id}/role",
+                        content=request_body,
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Webhook-Signature": signature,
+                            "X-Webhook-Timestamp": timestamp,
+                            "X-Webhook-Nonce": nonce,
+                        }
+                    )
+
+                    if response.status_code == 200:
+                        logger.info(f"✅ Role updated to {role} for user {user_id} (subscription update)")
+                    else:
+                        logger.error(f"❌ Failed to update role for user {user_id}: {response.text}")
+
+            except Exception as e:
+                logger.error(f"❌ Error calling Auth service for role update: {e}")
+
     return {
         "action": "subscription_updated",
         "subscription_id": subscription_id,
         "status": status,
+        "user_id": user_id,
     }
 
 
 async def handle_subscription_deleted(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Handle customer.subscription.deleted event.
-    
-    Downgrades user to developer tier.
+
+    Downgrades user to unsubscribed role.
     """
+    import httpx
+    import hmac
+    import hashlib
+    import time
+    import json
+    import uuid
+    from .config import settings
+
     subscription = payload.get("data", {}).get("object", {})
-    
+
     subscription_id = subscription.get("id")
     customer_id = subscription.get("customer")
-    
+    metadata = subscription.get("metadata", {})
+
+    user_id = metadata.get("user_id")
+
     logger.info(f"Subscription deleted: {subscription_id}")
-    
-    # TODO: Downgrade user to developer tier
-    
+
+    # Downgrade user to unsubscribed role
+    if user_id:
+        try:
+            # Include user_id in signed payload to bind signature to specific user
+            request_body = json.dumps({"role": "unsubscribed", "user_id": user_id}).encode()
+            timestamp = str(int(time.time()))
+            nonce = str(uuid.uuid4())
+
+            secret = getattr(settings, "INTERNAL_SERVICE_KEY", "").encode()
+            if not secret:
+                logger.error("INTERNAL_SERVICE_KEY not configured")
+                return {"error": "internal_key_missing"}
+
+            signature = hmac.new(
+                secret,
+                request_body + timestamp.encode() + nonce.encode(),
+                hashlib.sha256
+            ).hexdigest()
+
+            auth_url = getattr(settings, "AUTH_URL", "http://auth_service:8000").rstrip("/")
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{auth_url}/auth/users/{user_id}/role",
+                    content=request_body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Webhook-Signature": signature,
+                        "X-Webhook-Timestamp": timestamp,
+                        "X-Webhook-Nonce": nonce,
+                    }
+                )
+
+                if response.status_code == 200:
+                    logger.info(f"✅ Role downgraded to unsubscribed for user {user_id}")
+                else:
+                    logger.error(f"❌ Failed to downgrade role for user {user_id}: {response.text}")
+
+        except Exception as e:
+            logger.error(f"❌ Error calling Auth service for role downgrade: {e}")
+
     return {
         "action": "subscription_deleted",
         "subscription_id": subscription_id,
         "customer_id": customer_id,
+        "user_id": user_id,
     }
 
 
